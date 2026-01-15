@@ -221,27 +221,41 @@ RATING_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks;")
 echo -e "${GREEN}✓ Ratings migrated: $RATING_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 11: Decode URL-encoded Korean text...${NC}"
-# Use Python for URL decoding (more reliable)
-docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -t -A -c "SELECT id, username, deptname FROM users WHERE position('%' in username) > 0 OR position('%' in deptname) > 0;" | while IFS='|' read -r id username deptname; do
-    if [ -n "$id" ]; then
-        decoded_username=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$username'))" 2>/dev/null || echo "$username")
-        decoded_deptname=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$deptname'))" 2>/dev/null || echo "$deptname")
-        # Extract business_unit from decoded deptname: "부서이름(사업부이름)" → 사업부이름
-        business_unit=$(echo "$decoded_deptname" | grep -oP '(?<=\()[^)]+(?=\))' | head -1)
+# Use Node.js in dashboard-api container for URL decoding
+docker exec dashboard-api node -e "
+const { Client } = require('pg');
+const client = new Client({ connectionString: process.env.DATABASE_URL });
 
-        docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -c "UPDATE users SET username = '$decoded_username', deptname = '$decoded_deptname', business_unit = NULLIF('$business_unit', '') WHERE id = '$id'::uuid;" 2>/dev/null
-    fi
-done
-echo -e "${GREEN}✓ Users URL decoded${NC}"
+async function decode() {
+  await client.connect();
 
-# Update daily_usage_stats deptname
-echo "  Decoding daily_usage_stats..."
-docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -t -A -c "SELECT DISTINCT deptname FROM daily_usage_stats WHERE position('%' in deptname) > 0;" | while read -r deptname; do
-    if [ -n "$deptname" ]; then
-        decoded=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$deptname'))" 2>/dev/null || echo "$deptname")
-        docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -c "UPDATE daily_usage_stats SET deptname = '$decoded' WHERE deptname = '$deptname';" 2>/dev/null
-    fi
-done
+  // Decode users
+  const users = await client.query(\"SELECT id, username, deptname FROM users WHERE position('%' in username) > 0 OR position('%' in deptname) > 0\");
+  for (const row of users.rows) {
+    try {
+      const username = decodeURIComponent(row.username || '');
+      const deptname = decodeURIComponent(row.deptname || '');
+      const match = deptname.match(/\\(([^)]+)\\)/);
+      const businessUnit = match ? match[1] : null;
+      await client.query('UPDATE users SET username = \$1, deptname = \$2, business_unit = \$3 WHERE id = \$4', [username, deptname, businessUnit, row.id]);
+    } catch(e) { console.error('User error:', row.id, e.message); }
+  }
+  console.log('Users decoded:', users.rowCount);
+
+  // Decode daily_usage_stats
+  const stats = await client.query(\"SELECT DISTINCT deptname FROM daily_usage_stats WHERE position('%' in deptname) > 0\");
+  for (const row of stats.rows) {
+    try {
+      const decoded = decodeURIComponent(row.deptname || '');
+      await client.query('UPDATE daily_usage_stats SET deptname = \$1 WHERE deptname = \$2', [decoded, row.deptname]);
+    } catch(e) { console.error('Stats error:', e.message); }
+  }
+  console.log('Stats decoded:', stats.rowCount);
+
+  await client.end();
+}
+decode().catch(console.error);
+"
 DECODED_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users WHERE position('%' in username) = 0;")
 echo -e "${GREEN}✓ URL decoded. Users with clean names: $DECODED_COUNT${NC}"
 
