@@ -141,8 +141,8 @@ MODEL_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM models;")
 echo -e "${GREEN}✓ Models migrated: $MODEL_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 7: Migrate usage_logs (this may take a while)...${NC}"
-# Only migrate logs for users that exist in users table (join in legacy DB)
-legacy_psql -t -A -c "SELECT ul.id, ul.user_id, ul.model_id, ul.\"inputTokens\", ul.\"outputTokens\", ul.\"totalTokens\", ul.timestamp FROM usage_logs ul INNER JOIN users u ON ul.user_id = u.id INNER JOIN models m ON ul.model_id = m.id;" | \
+# Export all logs, filter in new DB for existing users/models
+legacy_psql -t -A -c "SELECT id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp FROM usage_logs;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_logs (
     id TEXT, user_id TEXT, model_id TEXT,
@@ -153,6 +153,8 @@ COPY tmp_logs FROM STDIN WITH (DELIMITER '|');
 INSERT INTO usage_logs (id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, service_id)
 SELECT t.id::uuid, t.user_id::uuid, t.model_id::uuid, t.input_tokens, t.output_tokens, t.total_tokens, t.timestamp, '$SERVICE_ID'::uuid
 FROM tmp_logs t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id::uuid)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_logs;
 "
@@ -160,8 +162,8 @@ LOG_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM usage_logs;")
 echo -e "${GREEN}✓ Usage logs migrated: $LOG_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 8: Migrate daily_usage_stats...${NC}"
-# Only migrate stats for users and models that exist (join in legacy DB)
-legacy_psql -t -A -c "SELECT ds.id, ds.date, ds.user_id, ds.model_id, ds.deptname, ds.\"totalInputTokens\", ds.\"totalOutputTokens\", ds.\"requestCount\" FROM daily_usage_stats ds INNER JOIN users u ON ds.user_id = u.id INNER JOIN models m ON ds.model_id = m.id;" | \
+# Export all stats, filter in new DB for existing users/models
+legacy_psql -t -A -c "SELECT id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\" FROM daily_usage_stats;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_stats (
     id TEXT, date DATE, user_id TEXT, model_id TEXT, deptname TEXT,
@@ -171,6 +173,8 @@ COPY tmp_stats FROM STDIN WITH (DELIMITER '|');
 INSERT INTO daily_usage_stats (id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", service_id)
 SELECT t.id::uuid, t.date, t.user_id::uuid, t.model_id::uuid, t.deptname, t.total_input, t.total_output, t.request_count, '$SERVICE_ID'::uuid
 FROM tmp_stats t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id::uuid)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_stats;
 "
@@ -178,8 +182,8 @@ STATS_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM daily_usage_stats;")
 echo -e "${GREEN}✓ Daily stats migrated: $STATS_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 9: Migrate feedbacks...${NC}"
-# Only migrate feedbacks for users that exist (join in legacy DB)
-legacy_psql -t -A -c "SELECT f.id, f.user_id, f.category, f.title, f.content, f.images, f.status, f.response, f.responded_by, f.responded_at, f.created_at, f.updated_at FROM feedbacks f INNER JOIN users u ON f.user_id = u.id;" 2>/dev/null | \
+# Export all feedbacks, filter in new DB for existing users
+legacy_psql -t -A -c "SELECT id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks;" 2>/dev/null | \
 new_psql -c "
 CREATE TEMP TABLE tmp_feedbacks (
     id TEXT, user_id TEXT, category TEXT, title TEXT, content TEXT,
@@ -193,6 +197,7 @@ SELECT
     CASE WHEN t.images IS NOT NULL AND t.images != '' THEN string_to_array(t.images, ',') ELSE ARRAY[]::TEXT[] END,
     t.status::\"FeedbackStatus\", t.response, NULLIF(t.responded_by, '')::uuid, t.responded_at, t.created_at, t.updated_at, '$SERVICE_ID'::uuid
 FROM tmp_feedbacks t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_feedbacks;
 " 2>/dev/null || echo "  (No feedbacks or skipped)"
