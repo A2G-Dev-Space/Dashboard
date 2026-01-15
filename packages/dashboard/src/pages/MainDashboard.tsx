@@ -73,9 +73,18 @@ interface DeptStats {
   tokensByModel: { modelName: string; tokens: number }[];
 }
 
+interface GlobalTotals {
+  totalServices: number;
+  totalUsers: number;
+  avgDailyActiveUsers: number;
+  totalRequests: number;
+  totalTokens: number;
+}
+
 export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [services, setServices] = useState<Service[]>([]);
   const [globalOverview, setGlobalOverview] = useState<GlobalOverviewService[]>([]);
+  const [globalTotals, setGlobalTotals] = useState<GlobalTotals | null>(null);
   const [serviceDaily, setServiceDaily] = useState<ServiceDailyData[]>([]);
   const [deptStats, setDeptStats] = useState<DeptStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,6 +111,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
       setServices(servicesRes.data.services || []);
       setGlobalOverview(globalRes.data.services || []);
+      setGlobalTotals(globalRes.data.totals || null);
       setServiceDaily(serviceDailyRes.data.dailyData || []);
       setDeptStats(deptRes.data.deptStats || []);
     } catch (error) {
@@ -157,11 +167,11 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     return num.toString();
   };
 
-  // Calculate totals
-  const totalUsers = globalOverview.reduce((sum, s) => sum + s.totalUsers, 0);
-  const avgDailyActive = globalOverview.reduce((sum, s) => sum + s.avgDailyActiveUsers, 0);
-  const totalTokens = globalOverview.reduce((sum, s) => sum + s.totalTokens, 0);
-  const totalRequests = globalOverview.reduce((sum, s) => sum + s.totalRequests, 0);
+  // Use deduplicated totals from API (users/avgDailyActiveUsers are deduplicated across services)
+  const totalUsers = globalTotals?.totalUsers ?? 0;
+  const avgDailyActive = globalTotals?.avgDailyActiveUsers ?? 0;
+  const totalTokens = globalTotals?.totalTokens ?? globalOverview.reduce((sum, s) => sum + s.totalTokens, 0);
+  const totalRequests = globalTotals?.totalRequests ?? globalOverview.reduce((sum, s) => sum + s.totalRequests, 0);
 
   // Prepare chart data for service daily usage
   const uniqueDates = [...new Set(serviceDaily.map(d => d.date))].sort();

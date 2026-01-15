@@ -1046,19 +1046,43 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           serviceDisplayName: service.displayName,
           totalUsers,
           todayRequests,
-          avgDailyUsers,
+          avgDailyActiveUsers: avgDailyUsers,  // Fixed: renamed to match frontend
           totalTokens,
           totalModels: service._count.models,
         };
       })
     );
 
-    // Overall totals
+    // Overall totals - deduplicate users across services
+    const [uniqueUsersResult, avgDailyActiveResult] = await Promise.all([
+      prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(DISTINCT user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+      `,
+      // Average daily active users (deduplicated across all services)
+      prisma.$queryRaw<Array<{ avg_users: number }>>`
+        SELECT COALESCE(AVG(user_count), 0)::float as avg_users
+        FROM (
+          SELECT DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as user_count
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+            AND ul.timestamp >= NOW() - INTERVAL '30 days'
+          GROUP BY DATE(ul.timestamp)
+        ) daily_counts
+      `,
+    ]);
+    const uniqueTotalUsers = Number(uniqueUsersResult[0]?.count || 0);
+    const avgDailyActive = Math.round(avgDailyActiveResult[0]?.avg_users || 0);
+
     const totals = {
       totalServices: services.length,
-      totalUsers: serviceStats.reduce((sum, s) => sum + s.totalUsers, 0),
+      totalUsers: uniqueTotalUsers,  // Deduplicated across all services
+      avgDailyActiveUsers: avgDailyActive,  // Deduplicated daily active users
       totalRequests: serviceStats.reduce((sum, s) => sum + s.todayRequests, 0),
-      totalTokens: serviceStats.reduce((sum, s) => sum + s.totalTokens, 0),
+      totalTokens: serviceStats.reduce((sum, s) => sum + Number(s.totalTokens), 0),
     };
 
     res.json({
@@ -1143,6 +1167,9 @@ adminRoutes.get('/stats/global/by-service', async (req: AuthenticatedRequest, re
  * GET /admin/stats/global/by-dept
  * 사업부별 통합 통계 (Main Dashboard용)
  * Query: ?days= (30), ?serviceId= (optional)
+ *
+ * 집계 기준: business_unit (deptname에서 추출된 사업부명)
+ * 예: "AI플랫폼팀(DS)" → business_unit = "DS"
  */
 adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) => {
   try {
@@ -1152,119 +1179,125 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // Get department statistics
-    let deptUsers: Array<{ deptname: string; user_count: bigint }>;
-    let deptDailyAvg: Array<{ deptname: string; avg_daily_users: number }>;
-    let deptModelTokens: Array<{ deptname: string; model_name: string; total_tokens: bigint }>;
+    // Get business unit statistics (using business_unit field)
+    let buUsers: Array<{ business_unit: string; user_count: bigint }>;
+    let buDailyAvg: Array<{ business_unit: string; avg_daily_users: number }>;
+    let buModelTokens: Array<{ business_unit: string; model_name: string; total_tokens: bigint }>;
 
-    // 1. 사업부별 누적 사용자
+    // 1. 사업부별 누적 사용자 (중복 제거)
     if (serviceId) {
-      deptUsers = await prisma.$queryRaw`
-        SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
+      buUsers = await prisma.$queryRaw`
+        SELECT u.business_unit, COUNT(DISTINCT ul.user_id) as user_count
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         WHERE u.loginid != 'anonymous'
-          AND u.deptname != ''
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
           AND ul.service_id::text = ${serviceId}
-        GROUP BY u.deptname
+        GROUP BY u.business_unit
         ORDER BY user_count DESC
       `;
     } else {
-      deptUsers = await prisma.$queryRaw`
-        SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
+      buUsers = await prisma.$queryRaw`
+        SELECT u.business_unit, COUNT(DISTINCT ul.user_id) as user_count
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         WHERE u.loginid != 'anonymous'
-          AND u.deptname != ''
-        GROUP BY u.deptname
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
+        GROUP BY u.business_unit
         ORDER BY user_count DESC
       `;
     }
 
     // 2. 사업부별 평균 일별 활성 사용자
     if (serviceId) {
-      deptDailyAvg = await prisma.$queryRaw`
-        SELECT deptname, AVG(daily_count)::float as avg_daily_users
+      buDailyAvg = await prisma.$queryRaw`
+        SELECT business_unit, COALESCE(AVG(daily_count), 0)::float as avg_daily_users
         FROM (
-          SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+          SELECT u.business_unit, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
           FROM usage_logs ul
           INNER JOIN users u ON ul.user_id = u.id
           WHERE u.loginid != 'anonymous'
-            AND u.deptname != ''
+            AND u.business_unit IS NOT NULL
+            AND u.business_unit != ''
             AND ul.timestamp >= ${startDate}
             AND ul.service_id::text = ${serviceId}
-          GROUP BY u.deptname, DATE(ul.timestamp)
+          GROUP BY u.business_unit, DATE(ul.timestamp)
         ) daily_stats
-        GROUP BY deptname
+        GROUP BY business_unit
       `;
     } else {
-      deptDailyAvg = await prisma.$queryRaw`
-        SELECT deptname, AVG(daily_count)::float as avg_daily_users
+      buDailyAvg = await prisma.$queryRaw`
+        SELECT business_unit, COALESCE(AVG(daily_count), 0)::float as avg_daily_users
         FROM (
-          SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+          SELECT u.business_unit, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
           FROM usage_logs ul
           INNER JOIN users u ON ul.user_id = u.id
           WHERE u.loginid != 'anonymous'
-            AND u.deptname != ''
+            AND u.business_unit IS NOT NULL
+            AND u.business_unit != ''
             AND ul.timestamp >= ${startDate}
-          GROUP BY u.deptname, DATE(ul.timestamp)
+          GROUP BY u.business_unit, DATE(ul.timestamp)
         ) daily_stats
-        GROUP BY deptname
+        GROUP BY business_unit
       `;
     }
 
     // 3. 사업부별 모델별 토큰 사용량
     if (serviceId) {
-      deptModelTokens = await prisma.$queryRaw`
-        SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
+      buModelTokens = await prisma.$queryRaw`
+        SELECT u.business_unit, m.name as model_name, SUM(ul."totalTokens") as total_tokens
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         INNER JOIN models m ON ul.model_id = m.id
         WHERE u.loginid != 'anonymous'
-          AND u.deptname != ''
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
           AND ul.service_id::text = ${serviceId}
-        GROUP BY u.deptname, m.name
-        ORDER BY u.deptname, total_tokens DESC
+        GROUP BY u.business_unit, m.name
+        ORDER BY u.business_unit, total_tokens DESC
       `;
     } else {
-      deptModelTokens = await prisma.$queryRaw`
-        SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
+      buModelTokens = await prisma.$queryRaw`
+        SELECT u.business_unit, m.name as model_name, SUM(ul."totalTokens") as total_tokens
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         INNER JOIN models m ON ul.model_id = m.id
         WHERE u.loginid != 'anonymous'
-          AND u.deptname != ''
-        GROUP BY u.deptname, m.name
-        ORDER BY u.deptname, total_tokens DESC
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
+        GROUP BY u.business_unit, m.name
+        ORDER BY u.business_unit, total_tokens DESC
       `;
     }
 
     // Combine into single response
-    const deptUserMap = new Map(deptUsers.map((d) => [d.deptname, Number(d.user_count)]));
-    const deptAvgMap = new Map(deptDailyAvg.map((d) => [d.deptname, Math.round(d.avg_daily_users)]));
+    const buUserMap = new Map(buUsers.map((d) => [d.business_unit, Number(d.user_count)]));
+    const buAvgMap = new Map(buDailyAvg.map((d) => [d.business_unit, Math.round(d.avg_daily_users || 0)]));
 
-    // Group model tokens by department
-    const deptTokensMap = new Map<string, Record<string, number>>();
-    for (const row of deptModelTokens) {
-      if (!deptTokensMap.has(row.deptname)) {
-        deptTokensMap.set(row.deptname, {});
+    // Group model tokens by business unit
+    const buTokensMap = new Map<string, Record<string, number>>();
+    for (const row of buModelTokens) {
+      if (!buTokensMap.has(row.business_unit)) {
+        buTokensMap.set(row.business_unit, {});
       }
-      deptTokensMap.get(row.deptname)![row.model_name] = Number(row.total_tokens);
+      buTokensMap.get(row.business_unit)![row.model_name] = Number(row.total_tokens);
     }
 
     // Build final result
-    const allDepts = [...new Set([...deptUserMap.keys(), ...deptAvgMap.keys(), ...deptTokensMap.keys()])];
+    const allBUs = [...new Set([...buUserMap.keys(), ...buAvgMap.keys(), ...buTokensMap.keys()])];
 
-    const deptStats = allDepts
-      .map((deptname) => {
-        const tokensObj = deptTokensMap.get(deptname) || {};
+    const deptStats = allBUs
+      .map((businessUnit) => {
+        const tokensObj = buTokensMap.get(businessUnit) || {};
         const tokensByModel = Object.entries(tokensObj)
           .map(([modelName, tokens]) => ({ modelName, tokens }))
           .sort((a, b) => b.tokens - a.tokens);
         return {
-          deptname,
-          cumulativeUsers: deptUserMap.get(deptname) || 0,
-          avgDailyActiveUsers: deptAvgMap.get(deptname) || 0,
+          deptname: businessUnit,  // Keep field name for frontend compatibility
+          cumulativeUsers: buUserMap.get(businessUnit) || 0,
+          avgDailyActiveUsers: buAvgMap.get(businessUnit) || 0,
           tokensByModel,
           totalTokens: tokensByModel.reduce((sum, t) => sum + t.tokens, 0),
         };
