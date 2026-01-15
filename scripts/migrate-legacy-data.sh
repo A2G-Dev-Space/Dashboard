@@ -221,38 +221,40 @@ RATING_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks;")
 echo -e "${GREEN}✓ Ratings migrated: $RATING_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 11: Decode URL-encoded Korean text...${NC}"
-# Use Node.js in dashboard-api container for URL decoding
+# Use Prisma in dashboard-api container for URL decoding
 docker exec dashboard-api node -e "
-const { Client } = require('pg');
-const client = new Client({ connectionString: process.env.DATABASE_URL });
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 async function decode() {
-  await client.connect();
-
   // Decode users
-  const users = await client.query(\"SELECT id, username, deptname FROM users WHERE position('%' in username) > 0 OR position('%' in deptname) > 0\");
-  for (const row of users.rows) {
+  const users = await prisma.\$queryRaw\`SELECT id, username, deptname FROM users WHERE position('%' in username) > 0 OR position('%' in deptname) > 0\`;
+  let userCount = 0;
+  for (const row of users) {
     try {
       const username = decodeURIComponent(row.username || '');
       const deptname = decodeURIComponent(row.deptname || '');
       const match = deptname.match(/\\(([^)]+)\\)/);
       const businessUnit = match ? match[1] : null;
-      await client.query('UPDATE users SET username = \$1, deptname = \$2, business_unit = \$3 WHERE id = \$4', [username, deptname, businessUnit, row.id]);
+      await prisma.\$executeRaw\`UPDATE users SET username = \${username}, deptname = \${deptname}, business_unit = \${businessUnit} WHERE id = \${row.id}\`;
+      userCount++;
     } catch(e) { console.error('User error:', row.id, e.message); }
   }
-  console.log('Users decoded:', users.rowCount);
+  console.log('Users decoded:', userCount);
 
   // Decode daily_usage_stats
-  const stats = await client.query(\"SELECT DISTINCT deptname FROM daily_usage_stats WHERE position('%' in deptname) > 0\");
-  for (const row of stats.rows) {
+  const stats = await prisma.\$queryRaw\`SELECT DISTINCT deptname FROM daily_usage_stats WHERE position('%' in deptname) > 0\`;
+  let statsCount = 0;
+  for (const row of stats) {
     try {
       const decoded = decodeURIComponent(row.deptname || '');
-      await client.query('UPDATE daily_usage_stats SET deptname = \$1 WHERE deptname = \$2', [decoded, row.deptname]);
+      await prisma.\$executeRaw\`UPDATE daily_usage_stats SET deptname = \${decoded} WHERE deptname = \${row.deptname}\`;
+      statsCount++;
     } catch(e) { console.error('Stats error:', e.message); }
   }
-  console.log('Stats decoded:', stats.rowCount);
+  console.log('Stats decoded:', statsCount);
 
-  await client.end();
+  await prisma.\$disconnect();
 }
 decode().catch(console.error);
 "
