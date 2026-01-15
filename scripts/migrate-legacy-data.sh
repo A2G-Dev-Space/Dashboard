@@ -75,13 +75,13 @@ echo -e "\n${YELLOW}Step 4: Migrate users...${NC}"
 legacy_psql -t -A -c "SELECT id, loginid, username, deptname, \"firstSeen\", \"lastActive\", \"isActive\" FROM users;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_users (
-    id UUID, loginid TEXT, username TEXT, deptname TEXT,
+    id TEXT, loginid TEXT, username TEXT, deptname TEXT,
     first_seen TIMESTAMP, last_active TIMESTAMP, is_active BOOLEAN
 );
 COPY tmp_users FROM STDIN WITH (DELIMITER '|');
 INSERT INTO users (id, loginid, username, deptname, business_unit, \"firstSeen\", \"lastActive\", \"isActive\")
 SELECT
-    id, loginid, username, deptname,
+    id::uuid, loginid, username, deptname,
     CASE
         WHEN deptname ~ '\\(.*\\)' THEN REGEXP_REPLACE(deptname, '.*\\((.*)\\).*', '\\1')
         ELSE NULL
@@ -102,12 +102,12 @@ echo -e "\n${YELLOW}Step 5: Migrate admins (ADMIN → SERVICE_ADMIN)...${NC}"
 legacy_psql -t -A -c "SELECT id, loginid, role, \"createdAt\" FROM admins;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_admins (
-    id UUID, loginid TEXT, role TEXT, created_at TIMESTAMP
+    id TEXT, loginid TEXT, role TEXT, created_at TIMESTAMP
 );
 COPY tmp_admins FROM STDIN WITH (DELIMITER '|');
 INSERT INTO admins (id, loginid, role, \"createdAt\")
 SELECT
-    id, loginid,
+    id::uuid, loginid,
     CASE
         WHEN role = 'ADMIN' THEN 'SERVICE_ADMIN'::\"AdminRole\"
         WHEN role = 'SUPER_ADMIN' THEN 'SUPER_ADMIN'::\"AdminRole\"
@@ -126,13 +126,13 @@ echo -e "\n${YELLOW}Step 6: Migrate models...${NC}"
 legacy_psql -t -A -c "SELECT id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\" FROM models;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_models (
-    id UUID, name TEXT, display_name TEXT, endpoint_url TEXT,
+    id TEXT, name TEXT, display_name TEXT, endpoint_url TEXT,
     api_key TEXT, max_tokens INT, enabled BOOLEAN,
-    created_at TIMESTAMP, created_by UUID
+    created_at TIMESTAMP, created_by TEXT
 );
 COPY tmp_models FROM STDIN WITH (DELIMITER '|', NULL '');
 INSERT INTO models (id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\", service_id)
-SELECT id, name, display_name, endpoint_url, api_key, max_tokens, enabled, created_at, created_by, '$SERVICE_ID'::uuid
+SELECT id::uuid, name, display_name, endpoint_url, api_key, max_tokens, enabled, created_at, NULLIF(created_by, '')::uuid, '$SERVICE_ID'::uuid
 FROM tmp_models
 ON CONFLICT (id) DO UPDATE SET service_id = '$SERVICE_ID'::uuid;
 DROP TABLE tmp_models;
@@ -141,20 +141,18 @@ MODEL_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM models;")
 echo -e "${GREEN}✓ Models migrated: $MODEL_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 7: Migrate usage_logs (this may take a while)...${NC}"
-# Only migrate logs for users that exist in users table
-legacy_psql -t -A -c "SELECT ul.id, ul.user_id, ul.model_id, ul.\"inputTokens\", ul.\"outputTokens\", ul.\"totalTokens\", ul.timestamp FROM usage_logs ul INNER JOIN users u ON ul.user_id = u.id;" | \
+# Only migrate logs for users that exist in users table (join in legacy DB)
+legacy_psql -t -A -c "SELECT ul.id, ul.user_id, ul.model_id, ul.\"inputTokens\", ul.\"outputTokens\", ul.\"totalTokens\", ul.timestamp FROM usage_logs ul INNER JOIN users u ON ul.user_id = u.id INNER JOIN models m ON ul.model_id = m.id;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_logs (
-    id UUID, user_id UUID, model_id UUID,
+    id TEXT, user_id TEXT, model_id TEXT,
     input_tokens INT, output_tokens INT, total_tokens INT,
     timestamp TIMESTAMP
 );
 COPY tmp_logs FROM STDIN WITH (DELIMITER '|');
 INSERT INTO usage_logs (id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, service_id)
-SELECT t.id, t.user_id, t.model_id, t.input_tokens, t.output_tokens, t.total_tokens, t.timestamp, '$SERVICE_ID'::uuid
+SELECT t.id::uuid, t.user_id::uuid, t.model_id::uuid, t.input_tokens, t.output_tokens, t.total_tokens, t.timestamp, '$SERVICE_ID'::uuid
 FROM tmp_logs t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
-  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_logs;
 "
@@ -162,19 +160,17 @@ LOG_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM usage_logs;")
 echo -e "${GREEN}✓ Usage logs migrated: $LOG_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 8: Migrate daily_usage_stats...${NC}"
-# Only migrate stats for users and models that exist
+# Only migrate stats for users and models that exist (join in legacy DB)
 legacy_psql -t -A -c "SELECT ds.id, ds.date, ds.user_id, ds.model_id, ds.deptname, ds.\"totalInputTokens\", ds.\"totalOutputTokens\", ds.\"requestCount\" FROM daily_usage_stats ds INNER JOIN users u ON ds.user_id = u.id INNER JOIN models m ON ds.model_id = m.id;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_stats (
-    id UUID, date DATE, user_id UUID, model_id UUID, deptname TEXT,
+    id TEXT, date DATE, user_id TEXT, model_id TEXT, deptname TEXT,
     total_input INT, total_output INT, request_count INT
 );
 COPY tmp_stats FROM STDIN WITH (DELIMITER '|');
 INSERT INTO daily_usage_stats (id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", service_id)
-SELECT t.id, t.date, t.user_id, t.model_id, t.deptname, t.total_input, t.total_output, t.request_count, '$SERVICE_ID'::uuid
+SELECT t.id::uuid, t.date, t.user_id::uuid, t.model_id::uuid, t.deptname, t.total_input, t.total_output, t.request_count, '$SERVICE_ID'::uuid
 FROM tmp_stats t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
-  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_stats;
 "
@@ -182,22 +178,21 @@ STATS_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM daily_usage_stats;")
 echo -e "${GREEN}✓ Daily stats migrated: $STATS_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 9: Migrate feedbacks...${NC}"
-# Only migrate feedbacks for users that exist
+# Only migrate feedbacks for users that exist (join in legacy DB)
 legacy_psql -t -A -c "SELECT f.id, f.user_id, f.category, f.title, f.content, f.images, f.status, f.response, f.responded_by, f.responded_at, f.created_at, f.updated_at FROM feedbacks f INNER JOIN users u ON f.user_id = u.id;" 2>/dev/null | \
 new_psql -c "
 CREATE TEMP TABLE tmp_feedbacks (
-    id UUID, user_id UUID, category TEXT, title TEXT, content TEXT,
-    images TEXT, status TEXT, response TEXT, responded_by UUID,
+    id TEXT, user_id TEXT, category TEXT, title TEXT, content TEXT,
+    images TEXT, status TEXT, response TEXT, responded_by TEXT,
     responded_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP
 );
 COPY tmp_feedbacks FROM STDIN WITH (DELIMITER '|', NULL '');
 INSERT INTO feedbacks (id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at, service_id)
 SELECT
-    t.id, t.user_id, t.category::\"FeedbackCategory\", t.title, t.content,
+    t.id::uuid, t.user_id::uuid, t.category::\"FeedbackCategory\", t.title, t.content,
     CASE WHEN t.images IS NOT NULL AND t.images != '' THEN string_to_array(t.images, ',') ELSE ARRAY[]::TEXT[] END,
-    t.status::\"FeedbackStatus\", t.response, t.responded_by, t.responded_at, t.created_at, t.updated_at, '$SERVICE_ID'::uuid
+    t.status::\"FeedbackStatus\", t.response, NULLIF(t.responded_by, '')::uuid, t.responded_at, t.created_at, t.updated_at, '$SERVICE_ID'::uuid
 FROM tmp_feedbacks t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_feedbacks;
 " 2>/dev/null || echo "  (No feedbacks or skipped)"
@@ -208,11 +203,11 @@ echo -e "\n${YELLOW}Step 10: Migrate rating_feedbacks...${NC}"
 legacy_psql -t -A -c "SELECT id, model_name, rating, timestamp FROM rating_feedbacks;" 2>/dev/null | \
 new_psql -c "
 CREATE TEMP TABLE tmp_ratings (
-    id UUID, model_name TEXT, rating INT, timestamp TIMESTAMP
+    id TEXT, model_name TEXT, rating INT, timestamp TIMESTAMP
 );
 COPY tmp_ratings FROM STDIN WITH (DELIMITER '|');
 INSERT INTO rating_feedbacks (id, model_name, rating, timestamp, service_id)
-SELECT id, model_name, rating, timestamp, '$SERVICE_ID'::uuid
+SELECT id::uuid, model_name, rating, timestamp, '$SERVICE_ID'::uuid
 FROM tmp_ratings
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_ratings;
