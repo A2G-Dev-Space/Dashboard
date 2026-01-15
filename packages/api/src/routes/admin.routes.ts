@@ -1632,8 +1632,8 @@ adminRoutes.get('/stats/global/by-dept-daily', async (req: AuthenticatedRequest,
       `;
     }
 
-    // 3. Build response
-    const dateMap = new Map<string, Record<string, number>>();
+    // 3. Build response with CUMULATIVE data
+    const dailyMap = new Map<string, Record<string, number>>();
 
     // Initialize all dates with 0 for all BUs
     for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
@@ -1642,24 +1642,34 @@ adminRoutes.get('/stats/global/by-dept-daily', async (req: AuthenticatedRequest,
       for (const bu of topBUNames) {
         initialData[bu] = 0;
       }
-      dateMap.set(dateStr, initialData);
+      dailyMap.set(dateStr, initialData);
     }
 
-    // Fill in actual data
+    // Fill in daily data first
     for (const stat of dailyStats) {
       const dateStr = formatDateToString(stat.date);
-      const existing = dateMap.get(dateStr);
+      const existing = dailyMap.get(dateStr);
       if (existing) {
         existing[stat.business_unit] = Number(stat.total_tokens);
       }
     }
 
-    const chartData = Array.from(dateMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, buData]) => ({
-        date,
-        ...buData,
-      }));
+    // Convert to cumulative
+    const sortedDates = Array.from(dailyMap.keys()).sort();
+    const cumulativeSum: Record<string, number> = {};
+    for (const bu of topBUNames) {
+      cumulativeSum[bu] = 0;
+    }
+
+    const chartData = sortedDates.map((date) => {
+      const dailyData = dailyMap.get(date)!;
+      const result: Record<string, string | number> = { date };
+      for (const bu of topBUNames) {
+        cumulativeSum[bu] += dailyData[bu] || 0;
+        result[bu] = cumulativeSum[bu];
+      }
+      return result;
+    });
 
     res.json({
       businessUnits: topBUNames,
@@ -1836,8 +1846,8 @@ adminRoutes.get('/stats/global/by-dept-service-requests-daily', async (req: Auth
       ORDER BY date ASC
     `;
 
-    // 3. Build response
-    const dateMap = new Map<string, Record<string, number>>();
+    // 3. Build response with CUMULATIVE data
+    const dailyMap = new Map<string, Record<string, number>>();
 
     for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0]!;
@@ -1845,24 +1855,34 @@ adminRoutes.get('/stats/global/by-dept-service-requests-daily', async (req: Auth
       for (const combo of comboNames) {
         initialData[combo] = 0;
       }
-      dateMap.set(dateStr, initialData);
+      dailyMap.set(dateStr, initialData);
     }
 
     for (const stat of dailyStats) {
       const dateStr = formatDateToString(stat.date);
       const comboKey = `${stat.business_unit}/${stat.service_name}`;
-      const existing = dateMap.get(dateStr);
+      const existing = dailyMap.get(dateStr);
       if (existing && comboNames.includes(comboKey)) {
         existing[comboKey] = Number(stat.requests);
       }
     }
 
-    const chartData = Array.from(dateMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, comboData]) => ({
-        date,
-        ...comboData,
-      }));
+    // Convert to cumulative
+    const sortedDates = Array.from(dailyMap.keys()).sort();
+    const cumulativeSum: Record<string, number> = {};
+    for (const combo of comboNames) {
+      cumulativeSum[combo] = 0;
+    }
+
+    const chartData = sortedDates.map((date) => {
+      const dailyData = dailyMap.get(date)!;
+      const result: Record<string, string | number> = { date };
+      for (const combo of comboNames) {
+        cumulativeSum[combo] += dailyData[combo] || 0;
+        result[combo] = cumulativeSum[combo];
+      }
+      return result;
+    });
 
     res.json({
       combinations: comboNames,

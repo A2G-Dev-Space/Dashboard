@@ -20,7 +20,7 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Line, Chart } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
@@ -247,32 +247,33 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     })),
   };
 
-  // Prepare dept users daily chart data (cumulative + active)
+  // Prepare dept users daily chart data (cumulative line + active bar)
   const deptUsersChartData = {
     labels: deptUsersDailyData.map(d => (d.date as string).slice(5)),
     datasets: deptUsersBUs.flatMap((bu, index) => [
       {
+        type: 'line' as const,
         label: `${bu} (누적)`,
         data: deptUsersDailyData.map(d => (d[`${bu}_cumulative`] as number) || 0),
         borderColor: colors[index % colors.length].border,
-        backgroundColor: colors[index % colors.length].bg,
-        borderWidth: 2,
-        fill: false,
-        tension: 0.3,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-      },
-      {
-        label: `${bu} (활성)`,
-        data: deptUsersDailyData.map(d => (d[`${bu}_active`] as number) || 0),
-        borderColor: colors[index % colors.length].border,
         backgroundColor: 'transparent',
         borderWidth: 2,
-        borderDash: [5, 5], // dashed line for active users
         fill: false,
         tension: 0.3,
         pointRadius: 2,
         pointHoverRadius: 5,
+        yAxisID: 'y',
+        order: 1, // Draw lines on top
+      },
+      {
+        type: 'bar' as const,
+        label: `${bu} (활성)`,
+        data: deptUsersDailyData.map(d => (d[`${bu}_active`] as number) || 0),
+        backgroundColor: colors[index % colors.length].bg,
+        borderColor: colors[index % colors.length].border,
+        borderWidth: 1,
+        yAxisID: 'y1',
+        order: 2, // Draw bars behind lines
       },
     ]),
   };
@@ -550,16 +551,17 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         </div>
       )}
 
-      {/* 1. Department Users Chart (Cumulative + Active) */}
+      {/* 1. Department Users Chart (Cumulative Line + Active Bar) */}
       {deptUsersDailyData.length > 0 && (
         <div className="bg-white rounded-2xl shadow-card p-6">
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-5 h-5 text-samsung-blue" />
             <h2 className="text-lg font-semibold text-gray-900">사업부별 사용자 추이</h2>
-            <span className="text-xs text-gray-500">(최근 30일, Top 5 사업부 - 실선: 누적, 점선: 활성)</span>
+            <span className="text-xs text-gray-500">(최근 30일, Top 5 사업부 - 선: 누적, 막대: 일별 활성)</span>
           </div>
           <div className="h-72">
-            <Line
+            <Chart
+              type="bar"
               data={deptUsersChartData}
               options={{
                 responsive: true,
@@ -587,7 +589,30 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                 },
                 scales: {
                   y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
                     beginAtZero: true,
+                    title: {
+                      display: true,
+                      text: '누적 사용자',
+                    },
+                    ticks: {
+                      callback: (value: string | number) => formatNumber(Number(value)),
+                    },
+                  },
+                  y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    title: {
+                      display: true,
+                      text: '일별 활성',
+                    },
+                    grid: {
+                      drawOnChartArea: false,
+                    },
                     ticks: {
                       callback: (value: string | number) => formatNumber(Number(value)),
                     },

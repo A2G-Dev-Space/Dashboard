@@ -34,6 +34,11 @@ interface FeedbackItem {
   responder: {
     loginid: string;
   } | null;
+  service?: {
+    id: string;
+    name: string;
+    displayName: string;
+  } | null;
 }
 
 interface ServiceInfo {
@@ -102,10 +107,9 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
     }
   };
 
-  const handleCreate = async (data: { category: string; title: string; content: string; images: string[] }) => {
+  const handleCreate = async (data: { category: string; title: string; content: string; images: string[]; serviceId?: string }) => {
     try {
-      const serviceId = selectedServiceId || undefined;
-      await feedbackApi.create({ ...data, serviceId });
+      await feedbackApi.create(data);
       setShowCreateModal(false);
       loadFeedbacks();
     } catch (error) {
@@ -275,6 +279,11 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
                     <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
                       <span>{feedback.user.username}</span>
                       <span>{new Date(feedback.createdAt).toLocaleDateString('ko-KR')}</span>
+                      {feedback.service && (
+                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">
+                          {feedback.service.displayName}
+                        </span>
+                      )}
                       {feedback.response && (
                         <span className="text-green-500">답변 완료</span>
                       )}
@@ -293,6 +302,8 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
         <CreateFeedbackModal
           onClose={() => setShowCreateModal(false)}
           onCreate={handleCreate}
+          services={services}
+          defaultServiceId={selectedServiceId}
         />
       )}
 
@@ -321,14 +332,19 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
 function CreateFeedbackModal({
   onClose,
   onCreate,
+  services,
+  defaultServiceId,
 }: {
   onClose: () => void;
-  onCreate: (data: { category: string; title: string; content: string; images: string[] }) => Promise<void>;
+  onCreate: (data: { category: string; title: string; content: string; images: string[]; serviceId?: string }) => Promise<void>;
+  services: ServiceInfo[];
+  defaultServiceId: string;
 }) {
   const [category, setCategory] = useState('ISSUE');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [serviceId, setServiceId] = useState(defaultServiceId);
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -336,7 +352,7 @@ function CreateFeedbackModal({
     e.preventDefault();
     setLoading(true);
     try {
-      await onCreate({ category, title, content, images });
+      await onCreate({ category, title, content, images, serviceId: serviceId || undefined });
     } finally {
       setLoading(false);
     }
@@ -421,6 +437,25 @@ function CreateFeedbackModal({
               </div>
             )}
           </div>
+
+          {/* Service Selector */}
+          {services.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">서비스</label>
+              <select
+                value={serviceId}
+                onChange={(e) => setServiceId(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
+              >
+                <option value="">서비스 선택 (선택사항)</option>
+                {services.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.displayName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">제목</label>
@@ -631,6 +666,11 @@ function FeedbackDetailModal({
                 {statusInfo.label}
               </span>
               <span className="text-sm text-gray-400">{category.label}</span>
+              {feedback.service && (
+                <span className="px-2 py-1 bg-blue-100 text-blue-600 text-sm rounded-lg">
+                  {feedback.service.displayName}
+                </span>
+              )}
               {isAdmin && (
                 <select
                   value={feedback.status}
