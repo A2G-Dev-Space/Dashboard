@@ -508,7 +508,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                       <td className="text-right py-3 px-2 text-gray-700">{formatNumber(dept.totalTokens)}</td>
                       <td className="py-3 px-2">
                         <div className="flex flex-wrap gap-1">
-                          {dept.tokensByModel.slice(0, 3).map((model) => (
+                          {(dept.tokensByModel || []).slice(0, 3).map((model) => (
                             <span
                               key={model.modelName}
                               className="inline-flex items-center px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded"
@@ -516,7 +516,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                               {model.modelName.length > 12 ? model.modelName.slice(0, 12) + '...' : model.modelName}: {formatNumber(model.tokens)}
                             </span>
                           ))}
-                          {dept.tokensByModel.length > 3 && (
+                          {(dept.tokensByModel || []).length > 3 && (
                             <span className="text-xs text-gray-500">+{dept.tokensByModel.length - 3}</span>
                           )}
                         </div>

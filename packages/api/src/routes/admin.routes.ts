@@ -1256,13 +1256,19 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
     const allDepts = [...new Set([...deptUserMap.keys(), ...deptAvgMap.keys(), ...deptTokensMap.keys()])];
 
     const deptStats = allDepts
-      .map((deptname) => ({
-        deptname,
-        cumulativeUsers: deptUserMap.get(deptname) || 0,
-        avgDailyActiveUsers: deptAvgMap.get(deptname) || 0,
-        tokensByModel: deptTokensMap.get(deptname) || {},
-        totalTokens: Object.values(deptTokensMap.get(deptname) || {}).reduce((sum, t) => sum + t, 0),
-      }))
+      .map((deptname) => {
+        const tokensObj = deptTokensMap.get(deptname) || {};
+        const tokensByModel = Object.entries(tokensObj)
+          .map(([modelName, tokens]) => ({ modelName, tokens }))
+          .sort((a, b) => b.tokens - a.tokens);
+        return {
+          deptname,
+          cumulativeUsers: deptUserMap.get(deptname) || 0,
+          avgDailyActiveUsers: deptAvgMap.get(deptname) || 0,
+          tokensByModel,
+          totalTokens: tokensByModel.reduce((sum, t) => sum + t.tokens, 0),
+        };
+      })
       .sort((a, b) => b.totalTokens - a.totalTokens);
 
     res.json({
