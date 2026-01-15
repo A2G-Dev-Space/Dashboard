@@ -1,0 +1,1423 @@
+/**
+ * Admin Routes
+ *
+ * Protected endpoints for admin dashboard
+ * - DEVELOPERS 환경변수의 사용자는 SUPER_ADMIN으로 표시
+ * - DB admins 테이블의 사용자는 해당 역할로 표시
+ * - 모든 통계 API는 ?serviceId= 쿼리 파라미터로 서비스별 필터링 지원
+ */
+
+import { Router, RequestHandler } from 'express';
+import { prisma } from '../index.js';
+import { redis } from '../index.js';
+import { authenticateToken, requireAdmin, requireSuperAdmin, AuthenticatedRequest, isDeveloper } from '../middleware/auth.js';
+import { getActiveUserCount, getTodayUsage } from '../services/redis.service.js';
+import { z } from 'zod';
+
+/**
+ * Helper: PostgreSQL DATE() 결과를 YYYY-MM-DD 문자열로 변환
+ */
+function formatDateToString(date: Date | string): string {
+  if (typeof date === 'string') {
+    return date.split('T')[0] || date;
+  }
+  return date.toISOString().split('T')[0]!;
+}
+
+/**
+ * Helper: serviceId 필터 조건 생성
+ */
+function getServiceFilter(serviceId: string | undefined) {
+  return serviceId ? { serviceId } : {};
+}
+
+export const adminRoutes = Router();
+
+// Apply authentication and admin check to all routes
+adminRoutes.use(authenticateToken);
+adminRoutes.use(requireAdmin as RequestHandler);
+
+// ==================== Models Management ====================
+
+const modelSchema = z.object({
+  name: z.string().min(1).max(100),
+  displayName: z.string().min(1).max(200),
+  endpointUrl: z.string().url(),
+  apiKey: z.string().optional(),
+  maxTokens: z.number().int().min(1).max(1000000).default(128000),
+  enabled: z.boolean().default(true),
+  serviceId: z.string().uuid().optional(),
+});
+
+/**
+ * GET /admin/models
+ * Get all models (including disabled)
+ * Query: ?serviceId= (optional)
+ */
+adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
+  try {
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    const models = await prisma.model.findMany({
+      where: getServiceFilter(serviceId),
+      include: {
+        creator: {
+          select: { loginid: true },
+        },
+        service: {
+          select: { id: true, name: true, displayName: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Mask API keys
+    const maskedModels = models.map((m) => ({
+      ...m,
+      apiKey: m.apiKey ? '***' + m.apiKey.slice(-4) : null,
+    }));
+
+    res.json({ models: maskedModels });
+  } catch (error) {
+    console.error('Get admin models error:', error);
+    res.status(500).json({ error: 'Failed to get models' });
+  }
+});
+
+/**
+ * POST /admin/models
+ * Create a new model
+ */
+adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (req.adminRole === 'VIEWER') {
+      res.status(403).json({ error: 'Viewers cannot create models' });
+      return;
+    }
+
+    const validation = modelSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    const admin = await prisma.admin.findUnique({
+      where: { loginid: req.user!.loginid },
+    });
+
+    const model = await prisma.model.create({
+      data: {
+        ...validation.data,
+        createdBy: admin?.id,
+      },
+    });
+
+    res.status(201).json({ model });
+  } catch (error) {
+    console.error('Create model error:', error);
+    res.status(500).json({ error: 'Failed to create model' });
+  }
+});
+
+/**
+ * PUT /admin/models/:id
+ * Update a model
+ */
+adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (req.adminRole === 'VIEWER') {
+      res.status(403).json({ error: 'Viewers cannot update models' });
+      return;
+    }
+
+    const { id } = req.params;
+    const validation = modelSchema.partial().safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    const model = await prisma.model.update({
+      where: { id },
+      data: validation.data,
+    });
+
+    res.json({ model });
+  } catch (error) {
+    console.error('Update model error:', error);
+    res.status(500).json({ error: 'Failed to update model' });
+  }
+});
+
+/**
+ * DELETE /admin/models/:id
+ * Delete a model
+ */
+adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (req.adminRole !== 'SUPER_ADMIN') {
+      res.status(403).json({ error: 'Only super admins can delete models' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    await prisma.model.delete({
+      where: { id },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete model error:', error);
+    res.status(500).json({ error: 'Failed to delete model' });
+  }
+});
+
+// ==================== Users Management ====================
+
+/**
+ * GET /admin/users
+ * Get all users with usage stats (excluding anonymous and users with 0 calls)
+ * Query: ?serviceId= (optional), ?page=, ?limit=
+ */
+adminRoutes.get('/users', async (req: AuthenticatedRequest, res) => {
+  try {
+    const page = parseInt(req.query['page'] as string) || 1;
+    const limit = parseInt(req.query['limit'] as string) || 50;
+    const skip = (page - 1) * limit;
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    // Filter: exclude anonymous AND only users with at least 1 usage log (optionally for specific service)
+    const whereClause = {
+      loginid: { not: 'anonymous' },
+      usageLogs: {
+        some: getServiceFilter(serviceId),
+      },
+    };
+
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        orderBy: { lastActive: 'desc' },
+        include: {
+          _count: {
+            select: { usageLogs: serviceId ? { where: { serviceId } } : true },
+          },
+        },
+      }),
+      prisma.user.count({
+        where: whereClause,
+      }),
+    ]);
+
+    res.json({
+      users,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ error: 'Failed to get users' });
+  }
+});
+
+/**
+ * GET /admin/users/:id
+ * Get user details with usage history
+ * Query: ?serviceId= (optional)
+ */
+adminRoutes.get('/users/:id', async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: {
+        usageLogs: {
+          where: getServiceFilter(serviceId),
+          orderBy: { timestamp: 'desc' },
+          take: 100,
+          include: {
+            model: {
+              select: { name: true, displayName: true },
+            },
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ error: 'Failed to get user' });
+  }
+});
+
+// ==================== Admin Management ====================
+
+/**
+ * GET /admin/admins
+ * Get all admins (super admin only)
+ */
+adminRoutes.get('/admins', requireSuperAdmin as RequestHandler, async (_req: AuthenticatedRequest, res) => {
+  try {
+    const admins = await prisma.admin.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({ admins });
+  } catch (error) {
+    console.error('Get admins error:', error);
+    res.status(500).json({ error: 'Failed to get admins' });
+  }
+});
+
+/**
+ * POST /admin/admins
+ * Add new admin (super admin only)
+ */
+adminRoutes.post('/admins', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { loginid, role, serviceId } = req.body;
+
+    if (!loginid || !['ADMIN', 'VIEWER'].includes(role)) {
+      res.status(400).json({ error: 'Invalid request' });
+      return;
+    }
+
+    // Create or update admin
+    const admin = await prisma.admin.upsert({
+      where: { loginid },
+      update: { role },
+      create: { loginid, role },
+    });
+
+    // If serviceId provided, add to AdminService
+    if (serviceId) {
+      await prisma.adminService.upsert({
+        where: {
+          adminId_serviceId: { adminId: admin.id, serviceId },
+        },
+        update: { role },
+        create: { adminId: admin.id, serviceId, role },
+      });
+    }
+
+    res.status(201).json({ admin });
+  } catch (error) {
+    console.error('Create admin error:', error);
+    res.status(500).json({ error: 'Failed to create admin' });
+  }
+});
+
+/**
+ * DELETE /admin/admins/:id
+ * Remove admin (super admin only)
+ */
+adminRoutes.delete('/admins/:id', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    // Can't delete super admins
+    const admin = await prisma.admin.findUnique({ where: { id } });
+    if (admin?.role === 'SUPER_ADMIN') {
+      res.status(403).json({ error: 'Cannot delete super admin' });
+      return;
+    }
+
+    await prisma.admin.delete({ where: { id } });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete admin error:', error);
+    res.status(500).json({ error: 'Failed to delete admin' });
+  }
+});
+
+// ==================== Statistics (서비스별 필터링 지원) ====================
+
+/**
+ * GET /admin/stats/overview
+ * Get dashboard overview statistics
+ * Query: ?serviceId= (optional)
+ */
+adminRoutes.get('/stats/overview', async (req: AuthenticatedRequest, res) => {
+  try {
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const serviceFilter = getServiceFilter(serviceId);
+
+    const [activeUsers, todayUsage, totalUsers, totalModels] = await Promise.all([
+      // Redis active users (전체 시스템)
+      getActiveUserCount(redis),
+      // Redis today usage (전체 시스템)
+      getTodayUsage(redis),
+      // DB에서 서비스별 사용자 수
+      prisma.user.count({
+        where: {
+          isActive: true,
+          loginid: { not: 'anonymous' },
+          usageLogs: { some: serviceFilter },
+        },
+      }),
+      // 서비스별 모델 수
+      prisma.model.count({
+        where: { enabled: true, ...serviceFilter },
+      }),
+    ]);
+
+    // 서비스별 today's usage (DB에서 계산)
+    let serviceTodayUsage = todayUsage;
+    if (serviceId) {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const todayStats = await prisma.usageLog.aggregate({
+        where: {
+          serviceId,
+          timestamp: { gte: todayStart },
+        },
+        _sum: {
+          inputTokens: true,
+          outputTokens: true,
+          totalTokens: true,
+        },
+        _count: true,
+      });
+
+      serviceTodayUsage = {
+        requests: todayStats._count,
+        inputTokens: todayStats._sum.inputTokens || 0,
+        outputTokens: todayStats._sum.outputTokens || 0,
+      };
+    }
+
+    res.json({
+      activeUsers,
+      todayUsage: serviceTodayUsage,
+      totalUsers,
+      totalModels,
+      serviceId: serviceId || null,
+    });
+  } catch (error) {
+    console.error('Get overview stats error:', error);
+    res.status(500).json({ error: 'Failed to get statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/daily
+ * Get daily usage for charts
+ * Query: ?serviceId= (optional), ?days=
+ */
+adminRoutes.get('/stats/daily', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    const dailyStats = await prisma.dailyUsageStat.groupBy({
+      by: ['date'],
+      where: {
+        date: { gte: startDate },
+        ...getServiceFilter(serviceId),
+      },
+      _sum: {
+        totalInputTokens: true,
+        totalOutputTokens: true,
+        requestCount: true,
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    res.json({ dailyStats });
+  } catch (error) {
+    console.error('Get daily stats error:', error);
+    res.status(500).json({ error: 'Failed to get daily statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/by-user
+ * Get usage grouped by user (excluding anonymous)
+ * Query: ?serviceId= (optional), ?days=
+ */
+adminRoutes.get('/stats/by-user', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const userStats = await prisma.usageLog.groupBy({
+      by: ['userId'],
+      where: {
+        timestamp: { gte: startDate },
+        user: {
+          loginid: { not: 'anonymous' },
+        },
+        ...getServiceFilter(serviceId),
+      },
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
+      },
+      _count: true,
+      orderBy: {
+        _sum: {
+          totalTokens: 'desc',
+        },
+      },
+      take: 20,
+    });
+
+    // Get user details
+    const userIds = userStats.map((s) => s.userId);
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, loginid: true, username: true, deptname: true },
+    });
+
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const statsWithUsers = userStats.map((s) => ({
+      ...s,
+      user: userMap.get(s.userId),
+    }));
+
+    res.json({ userStats: statsWithUsers });
+  } catch (error) {
+    console.error('Get user stats error:', error);
+    res.status(500).json({ error: 'Failed to get user statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/by-model
+ * Get usage grouped by model
+ * Query: ?serviceId= (optional), ?days=
+ */
+adminRoutes.get('/stats/by-model', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const modelStats = await prisma.usageLog.groupBy({
+      by: ['modelId'],
+      where: {
+        timestamp: { gte: startDate },
+        ...getServiceFilter(serviceId),
+      },
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
+      },
+      _count: true,
+      orderBy: {
+        _sum: {
+          totalTokens: 'desc',
+        },
+      },
+    });
+
+    // Get model details
+    const modelIds = modelStats.map((s) => s.modelId);
+    const models = await prisma.model.findMany({
+      where: { id: { in: modelIds } },
+      select: { id: true, name: true, displayName: true },
+    });
+
+    const modelMap = new Map(models.map((m) => [m.id, m]));
+    const statsWithModels = modelStats.map((s) => ({
+      ...s,
+      model: modelMap.get(s.modelId),
+    }));
+
+    res.json({ modelStats: statsWithModels });
+  } catch (error) {
+    console.error('Get model stats error:', error);
+    res.status(500).json({ error: 'Failed to get model statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/by-dept
+ * Get usage grouped by department
+ * Query: ?serviceId= (optional), ?days=
+ */
+adminRoutes.get('/stats/by-dept', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const deptStats = await prisma.dailyUsageStat.groupBy({
+      by: ['deptname'],
+      where: {
+        date: { gte: startDate },
+        ...getServiceFilter(serviceId),
+      },
+      _sum: {
+        totalInputTokens: true,
+        totalOutputTokens: true,
+        requestCount: true,
+      },
+      orderBy: {
+        _sum: {
+          totalInputTokens: 'desc',
+        },
+      },
+    });
+
+    res.json({ deptStats });
+  } catch (error) {
+    console.error('Get dept stats error:', error);
+    res.status(500).json({ error: 'Failed to get department statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/daily-active-users
+ * Get daily active user count for charts
+ * Query: ?serviceId= (optional), ?days= (14-365)
+ */
+adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get distinct users per day from usage logs (excluding anonymous)
+    let dailyUsers: Array<{ date: Date | string; user_count: bigint }>;
+
+    if (serviceId) {
+      dailyUsers = await prisma.$queryRaw`
+        SELECT DATE(ul.timestamp) as date, COUNT(DISTINCT ul.user_id) as user_count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp >= ${startDate}
+          AND u.loginid != 'anonymous'
+          AND ul.service_id = ${serviceId}::uuid
+        GROUP BY DATE(ul.timestamp)
+        ORDER BY date ASC
+      `;
+    } else {
+      dailyUsers = await prisma.$queryRaw`
+        SELECT DATE(ul.timestamp) as date, COUNT(DISTINCT ul.user_id) as user_count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp >= ${startDate}
+          AND u.loginid != 'anonymous'
+        GROUP BY DATE(ul.timestamp)
+        ORDER BY date ASC
+      `;
+    }
+
+    const chartData = dailyUsers.map((item) => ({
+      date: formatDateToString(item.date),
+      userCount: Number(item.user_count),
+    }));
+
+    // Get total unique users in period
+    let totalUsers: Array<{ count: bigint }>;
+
+    if (serviceId) {
+      totalUsers = await prisma.$queryRaw`
+        SELECT COUNT(DISTINCT ul.user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp >= ${startDate}
+          AND u.loginid != 'anonymous'
+          AND ul.service_id = ${serviceId}::uuid
+      `;
+    } else {
+      totalUsers = await prisma.$queryRaw`
+        SELECT COUNT(DISTINCT ul.user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp >= ${startDate}
+          AND u.loginid != 'anonymous'
+      `;
+    }
+
+    res.json({
+      chartData,
+      totalUniqueUsers: Number(totalUsers[0]?.count || 0),
+    });
+  } catch (error) {
+    console.error('Get daily active users error:', error);
+    res.status(500).json({ error: 'Failed to get daily active users' });
+  }
+});
+
+/**
+ * GET /admin/stats/cumulative-users
+ * Get cumulative unique user count by date
+ * Query: ?serviceId= (optional), ?days= (14-365)
+ */
+adminRoutes.get('/stats/cumulative-users', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get the first usage date for each user
+    let userFirstUsage: Array<{ first_date: Date | string; new_users: bigint }>;
+    let existingUsers: Array<{ count: bigint }>;
+
+    if (serviceId) {
+      userFirstUsage = await prisma.$queryRaw`
+        SELECT DATE(first_usage) as first_date, COUNT(*) as new_users
+        FROM (
+          SELECT ul.user_id, MIN(ul.timestamp) as first_usage
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+            AND ul.service_id = ${serviceId}::uuid
+          GROUP BY ul.user_id
+        ) as user_first
+        WHERE first_usage >= ${startDate}
+        GROUP BY DATE(first_usage)
+        ORDER BY first_date ASC
+      `;
+
+      existingUsers = await prisma.$queryRaw`
+        SELECT COUNT(DISTINCT ul.user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp < ${startDate}
+          AND u.loginid != 'anonymous'
+          AND ul.service_id = ${serviceId}::uuid
+      `;
+    } else {
+      userFirstUsage = await prisma.$queryRaw`
+        SELECT DATE(first_usage) as first_date, COUNT(*) as new_users
+        FROM (
+          SELECT ul.user_id, MIN(ul.timestamp) as first_usage
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+          GROUP BY ul.user_id
+        ) as user_first
+        WHERE first_usage >= ${startDate}
+        GROUP BY DATE(first_usage)
+        ORDER BY first_date ASC
+      `;
+
+      existingUsers = await prisma.$queryRaw`
+        SELECT COUNT(DISTINCT ul.user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp < ${startDate}
+          AND u.loginid != 'anonymous'
+      `;
+    }
+
+    let cumulativeCount = Number(existingUsers[0]?.count || 0);
+
+    const newUsersMap = new Map(
+      userFirstUsage.map((item) => [
+        formatDateToString(item.first_date),
+        Number(item.new_users),
+      ])
+    );
+
+    const chartData: Array<{ date: string; cumulativeUsers: number; newUsers: number }> = [];
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const newUsers = newUsersMap.get(dateStr) || 0;
+      cumulativeCount += newUsers;
+      chartData.push({
+        date: dateStr,
+        cumulativeUsers: cumulativeCount,
+        newUsers,
+      });
+    }
+
+    res.json({
+      chartData,
+      totalUsers: cumulativeCount,
+    });
+  } catch (error) {
+    console.error('Get cumulative users error:', error);
+    res.status(500).json({ error: 'Failed to get cumulative users' });
+  }
+});
+
+/**
+ * GET /admin/stats/model-daily-trend
+ * Get daily usage trend per model (for line chart)
+ * Query: ?serviceId= (optional), ?days= (14-365)
+ */
+adminRoutes.get('/stats/model-daily-trend', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get all models (optionally filtered by service)
+    const models = await prisma.model.findMany({
+      where: getServiceFilter(serviceId),
+      select: { id: true, name: true, displayName: true },
+    });
+
+    // Get daily stats grouped by model and date
+    let dailyStats: Array<{ date: Date | string; model_id: string; total_tokens: bigint }>;
+
+    if (serviceId) {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(timestamp) as date, model_id, SUM("totalTokens") as total_tokens
+        FROM usage_logs
+        WHERE timestamp >= ${startDate}
+          AND service_id = ${serviceId}::uuid
+        GROUP BY DATE(timestamp), model_id
+        ORDER BY date ASC
+      `;
+    } else {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(timestamp) as date, model_id, SUM("totalTokens") as total_tokens
+        FROM usage_logs
+        WHERE timestamp >= ${startDate}
+        GROUP BY DATE(timestamp), model_id
+        ORDER BY date ASC
+      `;
+    }
+
+    // Process into date-keyed structure
+    const dateMap = new Map<string, Record<string, number>>();
+    const modelIds = models.map((m) => m.id);
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, number> = {};
+      for (const modelId of modelIds) {
+        initialData[modelId] = 0;
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const existing = dateMap.get(dateStr);
+      if (existing) {
+        existing[stat.model_id] = Number(stat.total_tokens);
+      }
+    }
+
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, modelUsage]) => ({
+        date,
+        ...modelUsage,
+      }));
+
+    res.json({
+      models: models.map((m) => ({ id: m.id, name: m.name, displayName: m.displayName })),
+      chartData,
+    });
+  } catch (error) {
+    console.error('Get model daily trend error:', error);
+    res.status(500).json({ error: 'Failed to get model daily trend' });
+  }
+});
+
+/**
+ * GET /admin/stats/model-user-trend
+ * Get daily usage trend per user for a specific model
+ * Query: modelId (required), ?serviceId=, ?days= (14-365), ?topN= (10-100)
+ */
+adminRoutes.get('/stats/model-user-trend', async (req: AuthenticatedRequest, res) => {
+  try {
+    const modelId = req.query['modelId'] as string;
+    if (!modelId) {
+      res.status(400).json({ error: 'modelId is required' });
+      return;
+    }
+
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const topN = Math.min(100, Math.max(10, parseInt(req.query['topN'] as string) || 10));
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get top N users by total usage for this model
+    const topUsers = await prisma.usageLog.groupBy({
+      by: ['userId'],
+      where: {
+        modelId,
+        timestamp: { gte: startDate },
+        user: {
+          loginid: { not: 'anonymous' },
+        },
+        ...getServiceFilter(serviceId),
+      },
+      _sum: {
+        totalTokens: true,
+      },
+      orderBy: {
+        _sum: {
+          totalTokens: 'desc',
+        },
+      },
+      take: topN,
+    });
+
+    const topUserIds = topUsers.map((u) => u.userId);
+
+    // Get user details
+    const users = await prisma.user.findMany({
+      where: { id: { in: topUserIds } },
+      select: { id: true, loginid: true, username: true, deptname: true },
+    });
+
+    // Get daily stats for these users
+    let dailyStats: Array<{ date: Date | string; user_id: string; total_tokens: bigint }>;
+
+    if (serviceId) {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
+        FROM usage_logs
+        WHERE model_id = ${modelId}
+          AND user_id = ANY(${topUserIds})
+          AND timestamp >= ${startDate}
+          AND service_id = ${serviceId}::uuid
+        GROUP BY DATE(timestamp), user_id
+        ORDER BY date ASC
+      `;
+    } else {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
+        FROM usage_logs
+        WHERE model_id = ${modelId}
+          AND user_id = ANY(${topUserIds})
+          AND timestamp >= ${startDate}
+        GROUP BY DATE(timestamp), user_id
+        ORDER BY date ASC
+      `;
+    }
+
+    // Process into date-keyed structure
+    const dateMap = new Map<string, Record<string, number>>();
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, number> = {};
+      for (const userId of topUserIds) {
+        initialData[userId] = 0;
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const existing = dateMap.get(dateStr);
+      if (existing) {
+        existing[stat.user_id] = Number(stat.total_tokens);
+      }
+    }
+
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, userUsage]) => ({
+        date,
+        ...userUsage,
+      }));
+
+    const usersWithTotal = users.map((u) => {
+      const total = topUsers.find((t) => t.userId === u.id)?._sum.totalTokens || 0;
+      return { ...u, totalTokens: total };
+    }).sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
+
+    res.json({
+      users: usersWithTotal,
+      chartData,
+    });
+  } catch (error) {
+    console.error('Get model user trend error:', error);
+    res.status(500).json({ error: 'Failed to get model user trend' });
+  }
+});
+
+// ==================== Global Statistics (전체 서비스 통합) ====================
+
+/**
+ * GET /admin/stats/global/overview
+ * 전체 서비스 통합 통계 (Main Dashboard용)
+ */
+adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res) => {
+  try {
+    // Get all services with stats
+    const services = await prisma.service.findMany({
+      where: { enabled: true },
+      select: {
+        id: true,
+        name: true,
+        displayName: true,
+        _count: {
+          select: {
+            models: true,
+            usageLogs: true,
+          },
+        },
+      },
+    });
+
+    // Get per-service statistics
+    const serviceStats = await Promise.all(
+      services.map(async (service) => {
+        const [totalUsers, todayRequests, avgDailyUsers, totalTokens] = await Promise.all([
+          // Total unique users for this service
+          prisma.usageLog.groupBy({
+            by: ['userId'],
+            where: {
+              serviceId: service.id,
+              user: { loginid: { not: 'anonymous' } },
+            },
+          }).then((r) => r.length),
+
+          // Today's requests
+          prisma.usageLog.count({
+            where: {
+              serviceId: service.id,
+              timestamp: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+            },
+          }),
+
+          // Average daily active users (last 30 days)
+          prisma.$queryRaw<Array<{ avg_users: number }>>`
+            SELECT AVG(user_count)::float as avg_users
+            FROM (
+              SELECT DATE(timestamp), COUNT(DISTINCT user_id) as user_count
+              FROM usage_logs
+              WHERE service_id = ${service.id}::uuid
+                AND timestamp >= NOW() - INTERVAL '30 days'
+              GROUP BY DATE(timestamp)
+            ) daily_counts
+          `.then((r) => Math.round(r[0]?.avg_users || 0)),
+
+          // Total tokens
+          prisma.usageLog.aggregate({
+            where: { serviceId: service.id },
+            _sum: { totalTokens: true },
+          }).then((r) => r._sum.totalTokens || 0),
+        ]);
+
+        return {
+          serviceId: service.id,
+          serviceName: service.name,
+          serviceDisplayName: service.displayName,
+          totalUsers,
+          todayRequests,
+          avgDailyUsers,
+          totalTokens,
+          totalModels: service._count.models,
+        };
+      })
+    );
+
+    // Overall totals
+    const totals = {
+      totalServices: services.length,
+      totalUsers: serviceStats.reduce((sum, s) => sum + s.totalUsers, 0),
+      totalRequests: serviceStats.reduce((sum, s) => sum + s.todayRequests, 0),
+      totalTokens: serviceStats.reduce((sum, s) => sum + s.totalTokens, 0),
+    };
+
+    res.json({
+      services: serviceStats,
+      totals,
+    });
+  } catch (error) {
+    console.error('Get global overview error:', error);
+    res.status(500).json({ error: 'Failed to get global overview' });
+  }
+});
+
+/**
+ * GET /admin/stats/global/by-service
+ * 서비스별 누적 사용량 (시계열)
+ * Query: ?days= (14-365)
+ */
+adminRoutes.get('/stats/global/by-service', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get all services
+    const services = await prisma.service.findMany({
+      where: { enabled: true },
+      select: { id: true, name: true, displayName: true },
+    });
+
+    // Get daily stats per service
+    const dailyStats = await prisma.$queryRaw<
+      Array<{ date: Date | string; service_id: string; total_tokens: bigint }>
+    >`
+      SELECT DATE(timestamp) as date, service_id, SUM("totalTokens") as total_tokens
+      FROM usage_logs
+      WHERE timestamp >= ${startDate}
+        AND service_id IS NOT NULL
+      GROUP BY DATE(timestamp), service_id
+      ORDER BY date ASC
+    `;
+
+    // Process into chart data
+    const dateMap = new Map<string, Record<string, number>>();
+    const serviceIds = services.map((s) => s.id);
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, number> = {};
+      for (const serviceId of serviceIds) {
+        initialData[serviceId] = 0;
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const existing = dateMap.get(dateStr);
+      if (existing && stat.service_id) {
+        existing[stat.service_id] = Number(stat.total_tokens);
+      }
+    }
+
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, serviceUsage]) => ({
+        date,
+        ...serviceUsage,
+      }));
+
+    res.json({
+      services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
+      chartData,
+    });
+  } catch (error) {
+    console.error('Get global by-service stats error:', error);
+    res.status(500).json({ error: 'Failed to get service statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/global/by-dept
+ * 사업부별 통합 통계 (Main Dashboard용)
+ * Query: ?days= (30), ?serviceId= (optional)
+ */
+adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get department statistics
+    const serviceFilter = serviceId ? `AND ul.service_id = '${serviceId}'::uuid` : '';
+
+    // 1. 사업부별 누적 사용자
+    const deptUsers = await prisma.$queryRaw<Array<{ deptname: string; user_count: bigint }>>`
+      SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      WHERE u.loginid != 'anonymous'
+        AND u.deptname != ''
+        ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
+      GROUP BY u.deptname
+      ORDER BY user_count DESC
+    `;
+
+    // 2. 사업부별 평균 일별 활성 사용자
+    const deptDailyAvg = await prisma.$queryRaw<Array<{ deptname: string; avg_daily_users: number }>>`
+      SELECT deptname, AVG(daily_count)::float as avg_daily_users
+      FROM (
+        SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.deptname != ''
+          AND ul.timestamp >= ${startDate}
+          ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
+        GROUP BY u.deptname, DATE(ul.timestamp)
+      ) daily_stats
+      GROUP BY deptname
+    `;
+
+    // 3. 사업부별 모델별 토큰 사용량
+    const deptModelTokens = await prisma.$queryRaw<
+      Array<{ deptname: string; model_name: string; total_tokens: bigint }>
+    >`
+      SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      INNER JOIN models m ON ul.model_id = m.id
+      WHERE u.loginid != 'anonymous'
+        AND u.deptname != ''
+        ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
+      GROUP BY u.deptname, m.name
+      ORDER BY u.deptname, total_tokens DESC
+    `;
+
+    // Combine into single response
+    const deptUserMap = new Map(deptUsers.map((d) => [d.deptname, Number(d.user_count)]));
+    const deptAvgMap = new Map(deptDailyAvg.map((d) => [d.deptname, Math.round(d.avg_daily_users)]));
+
+    // Group model tokens by department
+    const deptTokensMap = new Map<string, Record<string, number>>();
+    for (const row of deptModelTokens) {
+      if (!deptTokensMap.has(row.deptname)) {
+        deptTokensMap.set(row.deptname, {});
+      }
+      deptTokensMap.get(row.deptname)![row.model_name] = Number(row.total_tokens);
+    }
+
+    // Build final result
+    const allDepts = [...new Set([...deptUserMap.keys(), ...deptAvgMap.keys(), ...deptTokensMap.keys()])];
+
+    const deptStats = allDepts
+      .map((deptname) => ({
+        deptname,
+        cumulativeUsers: deptUserMap.get(deptname) || 0,
+        avgDailyActiveUsers: deptAvgMap.get(deptname) || 0,
+        tokensByModel: deptTokensMap.get(deptname) || {},
+        totalTokens: Object.values(deptTokensMap.get(deptname) || {}).reduce((sum, t) => sum + t, 0),
+      }))
+      .sort((a, b) => b.totalTokens - a.totalTokens);
+
+    res.json({
+      deptStats,
+      totalDepts: deptStats.length,
+      periodDays: days,
+      serviceId: serviceId || null,
+    });
+  } catch (error) {
+    console.error('Get global by-dept stats error:', error);
+    res.status(500).json({ error: 'Failed to get department statistics' });
+  }
+});
+
+// ==================== User Promotion ====================
+
+/**
+ * GET /admin/users/:id/admin-status
+ * 사용자의 admin 상태 조회
+ */
+adminRoutes.get('/users/:id/admin-status', async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { loginid: true, username: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // 환경변수 개발자 체크
+    const isEnvDeveloper = isDeveloper(user.loginid);
+    if (isEnvDeveloper) {
+      res.json({
+        isAdmin: true,
+        adminRole: 'SUPER_ADMIN',
+        isDeveloper: true,
+        canModify: false,
+      });
+      return;
+    }
+
+    // DB admin 체크
+    const admin = await prisma.admin.findUnique({
+      where: { loginid: user.loginid },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({
+      isAdmin: !!admin,
+      adminRole: admin?.role || null,
+      isDeveloper: false,
+      canModify: true,
+      adminServices: admin?.adminServices || [],
+    });
+  } catch (error) {
+    console.error('Get user admin status error:', error);
+    res.status(500).json({ error: 'Failed to get admin status' });
+  }
+});
+
+/**
+ * POST /admin/users/:id/promote
+ * 사용자를 Admin으로 승격 (SUPER_ADMIN만)
+ * Body: { role: 'ADMIN' | 'VIEWER', serviceId?: string }
+ */
+adminRoutes.post('/users/:id/promote', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { role, serviceId } = req.body;
+
+    if (!role || !['ADMIN', 'VIEWER'].includes(role)) {
+      res.status(400).json({ error: 'role must be ADMIN or VIEWER' });
+      return;
+    }
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { loginid: true, username: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // 환경변수 개발자는 승격 불가
+    if (isDeveloper(user.loginid)) {
+      res.status(400).json({ error: 'Environment developers are already SUPER_ADMIN' });
+      return;
+    }
+
+    // Upsert admin record
+    const admin = await prisma.admin.upsert({
+      where: { loginid: user.loginid },
+      update: { role },
+      create: {
+        loginid: user.loginid,
+        role,
+      },
+    });
+
+    // If serviceId provided, add service-specific permission
+    if (serviceId) {
+      await prisma.adminService.upsert({
+        where: {
+          adminId_serviceId: { adminId: admin.id, serviceId },
+        },
+        update: { role },
+        create: { adminId: admin.id, serviceId, role },
+      });
+    }
+
+    res.json({
+      success: true,
+      admin,
+      message: `${user.username} promoted to ${role}${serviceId ? ' for service' : ''}`,
+    });
+  } catch (error) {
+    console.error('Promote user error:', error);
+    res.status(500).json({ error: 'Failed to promote user' });
+  }
+});
+
+/**
+ * DELETE /admin/users/:id/demote
+ * Admin 권한 해제 (SUPER_ADMIN만)
+ * Query: ?serviceId= (optional - 특정 서비스만 해제)
+ */
+adminRoutes.delete('/users/:id/demote', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { loginid: true, username: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // 환경변수 개발자는 해제 불가
+    if (isDeveloper(user.loginid)) {
+      res.status(400).json({ error: 'Cannot demote environment developers' });
+      return;
+    }
+
+    const admin = await prisma.admin.findUnique({
+      where: { loginid: user.loginid },
+    });
+
+    if (!admin) {
+      res.status(400).json({ error: 'User is not an admin' });
+      return;
+    }
+
+    if (serviceId) {
+      // Remove only service-specific permission
+      await prisma.adminService.deleteMany({
+        where: { adminId: admin.id, serviceId },
+      });
+
+      res.json({
+        success: true,
+        message: `${user.username} removed from service admin`,
+      });
+    } else {
+      // Remove entire admin record (and all service permissions)
+      await prisma.admin.delete({
+        where: { loginid: user.loginid },
+      });
+
+      res.json({
+        success: true,
+        message: `${user.username} demoted from admin`,
+      });
+    }
+  } catch (error) {
+    console.error('Demote user error:', error);
+    res.status(500).json({ error: 'Failed to demote user' });
+  }
+});
