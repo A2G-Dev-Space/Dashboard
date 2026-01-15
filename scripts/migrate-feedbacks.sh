@@ -61,14 +61,15 @@ echo -e "\n${YELLOW}Step 3: Check legacy feedbacks...${NC}"
 legacy_psql -c "SELECT id, category, status, LEFT(title, 30) as title, created_at FROM feedbacks ORDER BY created_at;"
 
 echo -e "\n${YELLOW}Step 4: Migrate feedbacks (without images)...${NC}"
-legacy_psql -t -A -c "SELECT id, user_id, category, title, content, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks;" | \
+# Use CSV format to handle newlines and special characters in content
+legacy_psql -c "COPY (SELECT id, user_id, category, title, content, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks) TO STDOUT WITH (FORMAT csv, HEADER false, NULL '');" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_feedbacks (
     id TEXT, user_id TEXT, category TEXT, title TEXT, content TEXT,
     status TEXT, response TEXT, responded_by TEXT,
     responded_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP
 );
-COPY tmp_feedbacks FROM STDIN WITH (DELIMITER '|', NULL '');
+COPY tmp_feedbacks FROM STDIN WITH (FORMAT csv, NULL '');
 INSERT INTO feedbacks (id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at, service_id)
 SELECT
     t.id::uuid, t.user_id::uuid, t.category::\"FeedbackCategory\", t.title, t.content,
@@ -92,13 +93,13 @@ if [ "$HAS_COMMENTS" = "t" ]; then
     echo -e "  Legacy comments: $COMMENT_COUNT_LEGACY"
 
     if [ "$COMMENT_COUNT_LEGACY" -gt 0 ]; then
-        legacy_psql -t -A -c "SELECT id, feedback_id, admin_id, content, created_at, updated_at FROM feedback_comments;" | \
+        legacy_psql -c "COPY (SELECT id, feedback_id, admin_id, content, created_at, updated_at FROM feedback_comments) TO STDOUT WITH (FORMAT csv, HEADER false, NULL '');" | \
         new_psql -c "
 CREATE TEMP TABLE tmp_comments (
     id TEXT, feedback_id TEXT, admin_id TEXT, content TEXT,
     created_at TIMESTAMP, updated_at TIMESTAMP
 );
-COPY tmp_comments FROM STDIN WITH (DELIMITER '|', NULL '');
+COPY tmp_comments FROM STDIN WITH (FORMAT csv, NULL '');
 INSERT INTO feedback_comments (id, feedback_id, admin_id, content, created_at, updated_at)
 SELECT t.id::uuid, t.feedback_id::uuid, t.admin_id::uuid, t.content, t.created_at, t.updated_at
 FROM tmp_comments t
