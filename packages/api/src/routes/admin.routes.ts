@@ -239,7 +239,7 @@ adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
     }
 
     // Also delete daily_usage_stats
-    await prisma.dailyUsageStats.deleteMany({
+    await prisma.dailyUsageStat.deleteMany({
       where: { modelId: id },
     });
 
