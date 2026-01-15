@@ -93,17 +93,18 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-// Ensure default service exists
-async function ensureDefaultService() {
+// Ensure default service exists and migrate legacy data
+async function ensureDefaultServiceAndMigrate() {
   const DEFAULT_SERVICE_NAME = process.env['DEFAULT_SERVICE_NAME'] || 'nexus-coder';
   const DEFAULT_SERVICE_DISPLAY_NAME = process.env['DEFAULT_SERVICE_DISPLAY_NAME'] || 'Nexus Coder';
 
-  const existing = await prisma.service.findUnique({
+  // 1. Create default service if not exists
+  let service = await prisma.service.findUnique({
     where: { name: DEFAULT_SERVICE_NAME },
   });
 
-  if (!existing) {
-    await prisma.service.create({
+  if (!service) {
+    service = await prisma.service.create({
       data: {
         name: DEFAULT_SERVICE_NAME,
         displayName: DEFAULT_SERVICE_DISPLAY_NAME,
@@ -111,10 +112,60 @@ async function ensureDefaultService() {
         enabled: true,
       },
     });
-    console.log(`[Service] Default service '${DEFAULT_SERVICE_NAME}' created`);
+    console.log(`[Migration] Default service '${DEFAULT_SERVICE_NAME}' created`);
   } else {
-    console.log(`[Service] Default service '${DEFAULT_SERVICE_NAME}' exists`);
+    console.log(`[Migration] Default service '${DEFAULT_SERVICE_NAME}' exists (id: ${service.id})`);
   }
+
+  // 2. Migrate legacy data (NULL serviceId -> default service)
+  const serviceId = service.id;
+
+  // Migrate models
+  const modelsUpdated = await prisma.model.updateMany({
+    where: { serviceId: null },
+    data: { serviceId },
+  });
+  if (modelsUpdated.count > 0) {
+    console.log(`[Migration] Updated ${modelsUpdated.count} models with serviceId`);
+  }
+
+  // Migrate usage_logs
+  const usageLogsUpdated = await prisma.usageLog.updateMany({
+    where: { serviceId: null },
+    data: { serviceId },
+  });
+  if (usageLogsUpdated.count > 0) {
+    console.log(`[Migration] Updated ${usageLogsUpdated.count} usage_logs with serviceId`);
+  }
+
+  // Migrate daily_usage_stats
+  const dailyStatsUpdated = await prisma.dailyUsageStat.updateMany({
+    where: { serviceId: null },
+    data: { serviceId },
+  });
+  if (dailyStatsUpdated.count > 0) {
+    console.log(`[Migration] Updated ${dailyStatsUpdated.count} daily_usage_stats with serviceId`);
+  }
+
+  // Migrate feedbacks
+  const feedbacksUpdated = await prisma.feedback.updateMany({
+    where: { serviceId: null },
+    data: { serviceId },
+  });
+  if (feedbacksUpdated.count > 0) {
+    console.log(`[Migration] Updated ${feedbacksUpdated.count} feedbacks with serviceId`);
+  }
+
+  // Migrate rating_feedbacks
+  const ratingsUpdated = await prisma.ratingFeedback.updateMany({
+    where: { serviceId: null },
+    data: { serviceId },
+  });
+  if (ratingsUpdated.count > 0) {
+    console.log(`[Migration] Updated ${ratingsUpdated.count} rating_feedbacks with serviceId`);
+  }
+
+  console.log('[Migration] Legacy data migration completed');
 }
 
 // Start server
@@ -128,8 +179,8 @@ async function main() {
     await redis.ping();
     console.log('Redis connected');
 
-    // Ensure default service exists
-    await ensureDefaultService();
+    // Ensure default service exists and migrate legacy data
+    await ensureDefaultServiceAndMigrate();
 
     app.listen(PORT, () => {
       console.log(`AX Portal API server running on port ${PORT}`);
