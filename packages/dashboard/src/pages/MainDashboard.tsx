@@ -20,7 +20,7 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
-import { Line, Bar } from 'react-chartjs-2';
+import { Line } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
@@ -498,7 +498,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                     tooltip: {
                       callbacks: {
                         label: (context) => {
-                          const value = context.parsed.y;
+                          const value = context.parsed.y ?? 0;
                           if (value >= 1000000) return `${context.dataset.label}: ${(value / 1000000).toFixed(1)}M`;
                           if (value >= 1000) return `${context.dataset.label}: ${(value / 1000).toFixed(1)}K`;
                           return `${context.dataset.label}: ${value}`;
@@ -510,7 +510,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                     y: {
                       beginAtZero: true,
                       ticks: {
-                        callback: (value) => {
+                        callback: (value: string | number) => {
                           if (typeof value === 'number') {
                             if (value >= 1000000) return (value / 1000000).toFixed(0) + 'M';
                             if (value >= 1000) return (value / 1000).toFixed(0) + 'K';
