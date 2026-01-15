@@ -93,6 +93,30 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Ensure default service exists
+async function ensureDefaultService() {
+  const DEFAULT_SERVICE_NAME = process.env['DEFAULT_SERVICE_NAME'] || 'nexus-coder';
+  const DEFAULT_SERVICE_DISPLAY_NAME = process.env['DEFAULT_SERVICE_DISPLAY_NAME'] || 'Nexus Coder';
+
+  const existing = await prisma.service.findUnique({
+    where: { name: DEFAULT_SERVICE_NAME },
+  });
+
+  if (!existing) {
+    await prisma.service.create({
+      data: {
+        name: DEFAULT_SERVICE_NAME,
+        displayName: DEFAULT_SERVICE_DISPLAY_NAME,
+        description: 'Default service (auto-created)',
+        enabled: true,
+      },
+    });
+    console.log(`[Service] Default service '${DEFAULT_SERVICE_NAME}' created`);
+  } else {
+    console.log(`[Service] Default service '${DEFAULT_SERVICE_NAME}' exists`);
+  }
+}
+
 // Start server
 async function main() {
   try {
@@ -104,8 +128,11 @@ async function main() {
     await redis.ping();
     console.log('Redis connected');
 
+    // Ensure default service exists
+    await ensureDefaultService();
+
     app.listen(PORT, () => {
-      console.log(`Nexus Coder API server running on port ${PORT}`);
+      console.log(`AX Portal API server running on port ${PORT}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
