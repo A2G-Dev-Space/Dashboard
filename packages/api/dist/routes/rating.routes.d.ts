@@ -5,5 +5,5 @@
  * - POST /rating: 평점 제출 (인증 불필요)
  * - GET /rating/stats: 모델별 평균 점수 조회
  */
-export declare const ratingRoutes: any;
+export declare const ratingRoutes: import("express-serve-static-core").Router;
 //# sourceMappingURL=rating.routes.d.ts.map

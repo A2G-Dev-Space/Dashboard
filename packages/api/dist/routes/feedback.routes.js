@@ -4,16 +4,24 @@
  * 피드백 관리 API
  * - 일반 사용자: 본인 피드백 CRUD
  * - Admin: 모든 피드백 조회 + 답변
+ * - ?serviceId= 쿼리 파라미터로 서비스별 필터링 지원
  */
 import { Router } from 'express';
 import { prisma } from '../index.js';
 import { authenticateToken, requireAdmin, isDeveloper } from '../middleware/auth.js';
 export const feedbackRoutes = Router();
 /**
+ * Helper: serviceId 필터 조건 생성
+ */
+function getServiceFilter(serviceId) {
+    return serviceId ? { serviceId } : {};
+}
+/**
  * GET /feedback
  * 피드백 목록 조회
  * - Admin: 모든 피드백
  * - 일반 사용자: 본인 피드백만
+ * Query: ?serviceId= (optional), ?status=, ?category=, ?page=, ?limit=
  */
 feedbackRoutes.get('/', authenticateToken, async (req, res) => {
     try {
@@ -21,7 +29,7 @@ feedbackRoutes.get('/', authenticateToken, async (req, res) => {
             res.status(401).json({ error: 'Authentication required' });
             return;
         }
-        const { status, category, page = '1', limit = '20' } = req.query;
+        const { status, category, page = '1', limit = '20', serviceId } = req.query;
         const pageNum = parseInt(page, 10);
         const limitNum = parseInt(limit, 10);
         const skip = (pageNum - 1) * limitNum;
@@ -36,7 +44,9 @@ feedbackRoutes.get('/', authenticateToken, async (req, res) => {
             return;
         }
         // Build where clause
-        const where = {};
+        const where = {
+            ...getServiceFilter(serviceId),
+        };
         // 일반 사용자는 본인 피드백만
         if (!isAdmin) {
             where.userId = user.id;
@@ -56,6 +66,9 @@ feedbackRoutes.get('/', authenticateToken, async (req, res) => {
                     },
                     responder: {
                         select: { loginid: true },
+                    },
+                    service: {
+                        select: { id: true, name: true, displayName: true },
                     },
                     comments: {
                         include: {
@@ -80,11 +93,65 @@ feedbackRoutes.get('/', authenticateToken, async (req, res) => {
                 total,
                 totalPages: Math.ceil(total / limitNum),
             },
+            serviceId: serviceId || null,
         });
     }
     catch (error) {
         console.error('Get feedbacks error:', error);
         res.status(500).json({ error: 'Failed to get feedbacks' });
+    }
+});
+/**
+ * GET /feedback/by-service
+ * 서비스별 피드백 요약
+ */
+feedbackRoutes.get('/by-service', authenticateToken, async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Authentication required' });
+            return;
+        }
+        const isAdmin = isDeveloper(req.user.loginid) || await checkIsAdmin(req.user.loginid);
+        // Get user from DB
+        const user = await prisma.user.findUnique({
+            where: { loginid: req.user.loginid },
+        });
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        // Build where clause (본인 피드백만 또는 Admin은 전체)
+        const where = {};
+        if (!isAdmin) {
+            where.userId = user.id;
+        }
+        // 서비스별 집계
+        const feedbackByService = await prisma.feedback.groupBy({
+            by: ['serviceId'],
+            where: {
+                ...where,
+                serviceId: { not: null },
+            },
+            _count: true,
+        });
+        // 서비스 정보 조회
+        const serviceIds = feedbackByService.map(f => f.serviceId).filter(Boolean);
+        const services = await prisma.service.findMany({
+            where: { id: { in: serviceIds } },
+            select: { id: true, name: true, displayName: true },
+        });
+        const serviceMap = new Map(services.map(s => [s.id, s]));
+        const result = feedbackByService.map(f => ({
+            serviceId: f.serviceId,
+            serviceName: serviceMap.get(f.serviceId)?.name || 'Unknown',
+            serviceDisplayName: serviceMap.get(f.serviceId)?.displayName || 'Unknown',
+            count: f._count,
+        }));
+        res.json({ feedbackByService: result });
+    }
+    catch (error) {
+        console.error('Get feedback by service error:', error);
+        res.status(500).json({ error: 'Failed to get feedback by service' });
     }
 });
 /**
@@ -106,6 +173,9 @@ feedbackRoutes.get('/:id', authenticateToken, async (req, res) => {
                 },
                 responder: {
                     select: { loginid: true },
+                },
+                service: {
+                    select: { id: true, name: true, displayName: true },
                 },
                 comments: {
                     include: {
@@ -138,6 +208,7 @@ feedbackRoutes.get('/:id', authenticateToken, async (req, res) => {
 /**
  * POST /feedback
  * 새 피드백 작성
+ * Body: { category, title, content, images?, serviceId? }
  */
 feedbackRoutes.post('/', authenticateToken, async (req, res) => {
     try {
@@ -145,7 +216,7 @@ feedbackRoutes.post('/', authenticateToken, async (req, res) => {
             res.status(401).json({ error: 'Authentication required' });
             return;
         }
-        const { category, title, content, images } = req.body;
+        const { category, title, content, images, serviceId } = req.body;
         if (!category || !title || !content) {
             res.status(400).json({ error: 'category, title, and content are required' });
             return;
@@ -155,6 +226,14 @@ feedbackRoutes.post('/', authenticateToken, async (req, res) => {
         if (!validCategories.includes(category)) {
             res.status(400).json({ error: `Invalid category. Must be one of: ${validCategories.join(', ')}` });
             return;
+        }
+        // Validate serviceId if provided
+        if (serviceId) {
+            const service = await prisma.service.findUnique({ where: { id: serviceId } });
+            if (!service) {
+                res.status(400).json({ error: 'Invalid serviceId' });
+                return;
+            }
         }
         // Get or create user
         const user = await prisma.user.upsert({
@@ -173,10 +252,14 @@ feedbackRoutes.post('/', authenticateToken, async (req, res) => {
                 title,
                 content,
                 images: images || [],
+                serviceId: serviceId || null,
             },
             include: {
                 user: {
                     select: { loginid: true, username: true, deptname: true },
+                },
+                service: {
+                    select: { id: true, name: true, displayName: true },
                 },
             },
         });
@@ -198,7 +281,7 @@ feedbackRoutes.put('/:id', authenticateToken, async (req, res) => {
             return;
         }
         const { id } = req.params;
-        const { category, title, content, images } = req.body;
+        const { category, title, content, images, serviceId } = req.body;
         // Get user
         const user = await prisma.user.findUnique({
             where: { loginid: req.user.loginid },
@@ -240,12 +323,26 @@ feedbackRoutes.put('/:id', authenticateToken, async (req, res) => {
             updateData.content = content;
         if (images !== undefined)
             updateData.images = images;
+        if (serviceId !== undefined) {
+            // Validate serviceId if provided
+            if (serviceId) {
+                const service = await prisma.service.findUnique({ where: { id: serviceId } });
+                if (!service) {
+                    res.status(400).json({ error: 'Invalid serviceId' });
+                    return;
+                }
+            }
+            updateData.serviceId = serviceId || null;
+        }
         const feedback = await prisma.feedback.update({
             where: { id },
             data: updateData,
             include: {
                 user: {
                     select: { loginid: true, username: true, deptname: true },
+                },
+                service: {
+                    select: { id: true, name: true, displayName: true },
                 },
             },
         });
@@ -355,6 +452,9 @@ feedbackRoutes.post('/:id/respond', authenticateToken, requireAdmin, async (req,
                 responder: {
                     select: { loginid: true },
                 },
+                service: {
+                    select: { id: true, name: true, displayName: true },
+                },
             },
         });
         res.json(feedback);
@@ -390,6 +490,9 @@ feedbackRoutes.patch('/:id/status', authenticateToken, requireAdmin, async (req,
                 responder: {
                     select: { loginid: true },
                 },
+                service: {
+                    select: { id: true, name: true, displayName: true },
+                },
             },
         });
         res.json(feedback);
@@ -400,19 +503,24 @@ feedbackRoutes.patch('/:id/status', authenticateToken, requireAdmin, async (req,
     }
 });
 /**
- * GET /feedback/stats
+ * GET /feedback/stats/overview
  * 피드백 통계 (Admin만)
+ * Query: ?serviceId= (optional)
  */
-feedbackRoutes.get('/stats/overview', authenticateToken, requireAdmin, async (_req, res) => {
+feedbackRoutes.get('/stats/overview', authenticateToken, requireAdmin, async (req, res) => {
     try {
+        const serviceId = req.query['serviceId'];
+        const serviceFilter = getServiceFilter(serviceId);
         const [total, byStatus, byCategory] = await Promise.all([
-            prisma.feedback.count(),
+            prisma.feedback.count({ where: serviceFilter }),
             prisma.feedback.groupBy({
                 by: ['status'],
+                where: serviceFilter,
                 _count: true,
             }),
             prisma.feedback.groupBy({
                 by: ['category'],
+                where: serviceFilter,
                 _count: true,
             }),
         ]);
@@ -426,6 +534,7 @@ feedbackRoutes.get('/stats/overview', authenticateToken, requireAdmin, async (_r
                 acc[item.category] = item._count;
                 return acc;
             }, {}),
+            serviceId: serviceId || null,
         });
     }
     catch (error) {

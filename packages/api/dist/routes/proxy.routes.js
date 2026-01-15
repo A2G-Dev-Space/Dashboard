@@ -15,6 +15,69 @@ const DEFAULT_USER = {
     username: 'Anonymous User',
     deptname: 'Unknown',
 };
+// 기본 서비스 설정 (환경변수에서 가져오기)
+const DEFAULT_SERVICE_NAME = process.env['DEFAULT_SERVICE_NAME'] || process.env['DEFAULT_SERVICE_ID'] || 'nexus-coder';
+// 서비스 ID 캐시 (매 요청마다 DB 조회 방지)
+let cachedDefaultServiceId = null;
+/**
+ * 기본 서비스 ID 조회 (캐시 사용)
+ */
+async function getDefaultServiceId() {
+    if (cachedDefaultServiceId) {
+        return cachedDefaultServiceId;
+    }
+    const service = await prisma.service.findFirst({
+        where: { name: DEFAULT_SERVICE_NAME },
+        select: { id: true },
+    });
+    if (service) {
+        cachedDefaultServiceId = service.id;
+        console.log(`[Service] Default service resolved: ${DEFAULT_SERVICE_NAME} -> ${service.id}`);
+    }
+    else {
+        console.warn(`[Service] Default service '${DEFAULT_SERVICE_NAME}' not found in database`);
+    }
+    return cachedDefaultServiceId;
+}
+/**
+ * 요청에서 서비스 ID 추출
+ * X-Service-Id 헤더가 있으면 해당 서비스, 없으면 기본 서비스
+ * @returns { serviceId: string | null, error: string | null }
+ */
+async function getServiceIdFromRequest(req) {
+    const serviceHeader = req.headers['x-service-id'];
+    if (serviceHeader) {
+        // 헤더에 서비스가 지정된 경우 해당 서비스 조회
+        const service = await prisma.service.findFirst({
+            where: {
+                OR: [
+                    { id: serviceHeader },
+                    { name: serviceHeader },
+                ],
+            },
+            select: { id: true },
+        });
+        if (service) {
+            return { serviceId: service.id, error: null };
+        }
+        // 명시적으로 서비스를 지정했지만 등록되지 않은 경우 → 거부
+        console.warn(`[Service] Unregistered service '${serviceHeader}' rejected`);
+        return { serviceId: null, error: `Service '${serviceHeader}' is not registered. Please contact admin to register your service.` };
+    }
+    // 헤더가 없는 경우 기본 서비스 사용 (null → nexus-coder)
+    const defaultServiceId = await getDefaultServiceId();
+    return { serviceId: defaultServiceId, error: null };
+}
+/**
+ * deptname에서 businessUnit 추출
+ * "DS/AI팀" → "DS", "메모리사업부/설계팀" → "메모리사업부"
+ */
+function extractBusinessUnit(deptname) {
+    if (!deptname)
+        return '';
+    const parts = deptname.split('/');
+    return parts[0]?.trim() || '';
+}
 /**
  * 사용자 조회 또는 생성 (upsert)
  * X-User-Id 헤더가 있으면 해당 사용자, 없으면 기본 사용자
@@ -23,24 +86,27 @@ async function getOrCreateUser(req) {
     const loginid = req.headers['x-user-id'] || DEFAULT_USER.loginid;
     const username = req.headers['x-user-name'] || DEFAULT_USER.username;
     const deptname = req.headers['x-user-dept'] || DEFAULT_USER.deptname;
+    const businessUnit = extractBusinessUnit(deptname);
     const user = await prisma.user.upsert({
         where: { loginid },
         update: {
             lastActive: new Date(),
             deptname, // 조직개편 시 자동 갱신
+            businessUnit,
         },
         create: {
             loginid,
             username,
             deptname,
+            businessUnit,
         },
     });
     return user;
 }
 /**
- * Usage 저장 (DB + Redis)
+ * Usage 저장 (DB + Redis + UserService)
  */
-async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens) {
+async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens, serviceId) {
     const totalTokens = inputTokens + outputTokens;
     // DB에 usage_logs 저장
     await prisma.usageLog.create({
@@ -50,13 +116,36 @@ async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens) 
             inputTokens,
             outputTokens,
             totalTokens,
+            serviceId,
         },
     });
+    // UserService 업데이트 (서비스별 사용자 활동 추적)
+    if (serviceId) {
+        await prisma.userService.upsert({
+            where: {
+                userId_serviceId: {
+                    userId,
+                    serviceId,
+                },
+            },
+            update: {
+                lastActive: new Date(),
+                requestCount: { increment: 1 },
+            },
+            create: {
+                userId,
+                serviceId,
+                firstSeen: new Date(),
+                lastActive: new Date(),
+                requestCount: 1,
+            },
+        });
+    }
     // Redis 카운터 업데이트
     await incrementUsage(redis, userId, modelId, inputTokens, outputTokens);
     // 활성 사용자 추적
     await trackActiveUser(redis, loginid);
-    console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
+    console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
 }
 /**
  * endpointUrl에 /chat/completions가 없으면 자동 추가
@@ -146,6 +235,13 @@ proxyRoutes.post('/chat/completions', async (req, res) => {
         }
         // Get or create user for usage tracking
         const user = await getOrCreateUser(req);
+        // Get service ID from header or use default
+        const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
+        // Reject requests from unregistered services
+        if (serviceError) {
+            res.status(403).json({ error: serviceError });
+            return;
+        }
         // Prepare request to actual LLM
         const llmRequestBody = {
             model: model.name,
@@ -161,10 +257,10 @@ proxyRoutes.post('/chat/completions', async (req, res) => {
         }
         // Handle streaming
         if (stream) {
-            await handleStreamingRequest(res, model, llmRequestBody, headers, user);
+            await handleStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
         }
         else {
-            await handleNonStreamingRequest(res, model, llmRequestBody, headers, user);
+            await handleNonStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
         }
     }
     catch (error) {
@@ -175,7 +271,7 @@ proxyRoutes.post('/chat/completions', async (req, res) => {
 /**
  * Handle non-streaming chat completion
  */
-async function handleNonStreamingRequest(res, model, requestBody, headers, user) {
+async function handleNonStreamingRequest(res, model, requestBody, headers, user, serviceId) {
     try {
         const url = buildChatCompletionsUrl(model.endpointUrl);
         console.log(`[Proxy] Non-streaming request to: ${url}`);
@@ -196,7 +292,7 @@ async function handleNonStreamingRequest(res, model, requestBody, headers, user)
             const inputTokens = data.usage.prompt_tokens || 0;
             const outputTokens = data.usage.completion_tokens || 0;
             // 비동기로 usage 저장 (응답 지연 방지)
-            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens).catch((err) => {
+            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
                 console.error('[Usage] Failed to record usage:', err);
             });
         }
@@ -212,7 +308,7 @@ async function handleNonStreamingRequest(res, model, requestBody, headers, user)
  * Handle streaming chat completion
  * Streaming에서는 마지막 chunk에 usage 정보가 포함될 수 있음
  */
-async function handleStreamingRequest(res, model, requestBody, headers, user) {
+async function handleStreamingRequest(res, model, requestBody, headers, user, serviceId) {
     try {
         const url = buildChatCompletionsUrl(model.endpointUrl);
         console.log(`[Proxy] Streaming request to: ${url}`);
@@ -301,7 +397,7 @@ async function handleStreamingRequest(res, model, requestBody, headers, user) {
         if (usageData) {
             const inputTokens = usageData.prompt_tokens || 0;
             const outputTokens = usageData.completion_tokens || 0;
-            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens).catch((err) => {
+            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
                 console.error('[Usage] Failed to record streaming usage:', err);
             });
         }

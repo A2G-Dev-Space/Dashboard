@@ -915,8 +915,8 @@ adminRoutes.get('/stats/model-user-trend', async (req: AuthenticatedRequest, res
       dailyStats = await prisma.$queryRaw`
         SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
         FROM usage_logs
-        WHERE model_id = ${modelId}
-          AND user_id = ANY(${topUserIds})
+        WHERE model_id = ${modelId}::uuid
+          AND user_id = ANY(${topUserIds}::uuid[])
           AND timestamp >= ${startDate}
           AND service_id = ${serviceId}::uuid
         GROUP BY DATE(timestamp), user_id
@@ -926,8 +926,8 @@ adminRoutes.get('/stats/model-user-trend', async (req: AuthenticatedRequest, res
       dailyStats = await prisma.$queryRaw`
         SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
         FROM usage_logs
-        WHERE model_id = ${modelId}
-          AND user_id = ANY(${topUserIds})
+        WHERE model_id = ${modelId}::uuid
+          AND user_id = ANY(${topUserIds}::uuid[])
           AND timestamp >= ${startDate}
         GROUP BY DATE(timestamp), user_id
         ORDER BY date ASC
@@ -1153,50 +1153,91 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
     startDate.setHours(0, 0, 0, 0);
 
     // Get department statistics
-    const serviceFilter = serviceId ? `AND ul.service_id = '${serviceId}'::uuid` : '';
+    let deptUsers: Array<{ deptname: string; user_count: bigint }>;
+    let deptDailyAvg: Array<{ deptname: string; avg_daily_users: number }>;
+    let deptModelTokens: Array<{ deptname: string; model_name: string; total_tokens: bigint }>;
 
     // 1. 사업부별 누적 사용자
-    const deptUsers = await prisma.$queryRaw<Array<{ deptname: string; user_count: bigint }>>`
-      SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
-      FROM usage_logs ul
-      INNER JOIN users u ON ul.user_id = u.id
-      WHERE u.loginid != 'anonymous'
-        AND u.deptname != ''
-        ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
-      GROUP BY u.deptname
-      ORDER BY user_count DESC
-    `;
-
-    // 2. 사업부별 평균 일별 활성 사용자
-    const deptDailyAvg = await prisma.$queryRaw<Array<{ deptname: string; avg_daily_users: number }>>`
-      SELECT deptname, AVG(daily_count)::float as avg_daily_users
-      FROM (
-        SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+    if (serviceId) {
+      deptUsers = await prisma.$queryRaw`
+        SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         WHERE u.loginid != 'anonymous'
           AND u.deptname != ''
-          AND ul.timestamp >= ${startDate}
-          ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
-        GROUP BY u.deptname, DATE(ul.timestamp)
-      ) daily_stats
-      GROUP BY deptname
-    `;
+          AND ul.service_id = ${serviceId}::uuid
+        GROUP BY u.deptname
+        ORDER BY user_count DESC
+      `;
+    } else {
+      deptUsers = await prisma.$queryRaw`
+        SELECT u.deptname, COUNT(DISTINCT ul.user_id) as user_count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.deptname != ''
+        GROUP BY u.deptname
+        ORDER BY user_count DESC
+      `;
+    }
+
+    // 2. 사업부별 평균 일별 활성 사용자
+    if (serviceId) {
+      deptDailyAvg = await prisma.$queryRaw`
+        SELECT deptname, AVG(daily_count)::float as avg_daily_users
+        FROM (
+          SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+            AND u.deptname != ''
+            AND ul.timestamp >= ${startDate}
+            AND ul.service_id = ${serviceId}::uuid
+          GROUP BY u.deptname, DATE(ul.timestamp)
+        ) daily_stats
+        GROUP BY deptname
+      `;
+    } else {
+      deptDailyAvg = await prisma.$queryRaw`
+        SELECT deptname, AVG(daily_count)::float as avg_daily_users
+        FROM (
+          SELECT u.deptname, DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as daily_count
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+            AND u.deptname != ''
+            AND ul.timestamp >= ${startDate}
+          GROUP BY u.deptname, DATE(ul.timestamp)
+        ) daily_stats
+        GROUP BY deptname
+      `;
+    }
 
     // 3. 사업부별 모델별 토큰 사용량
-    const deptModelTokens = await prisma.$queryRaw<
-      Array<{ deptname: string; model_name: string; total_tokens: bigint }>
-    >`
-      SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
-      FROM usage_logs ul
-      INNER JOIN users u ON ul.user_id = u.id
-      INNER JOIN models m ON ul.model_id = m.id
-      WHERE u.loginid != 'anonymous'
-        AND u.deptname != ''
-        ${serviceId ? prisma.$queryRaw`AND ul.service_id = ${serviceId}::uuid` : prisma.$queryRaw``}
-      GROUP BY u.deptname, m.name
-      ORDER BY u.deptname, total_tokens DESC
-    `;
+    if (serviceId) {
+      deptModelTokens = await prisma.$queryRaw`
+        SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        INNER JOIN models m ON ul.model_id = m.id
+        WHERE u.loginid != 'anonymous'
+          AND u.deptname != ''
+          AND ul.service_id = ${serviceId}::uuid
+        GROUP BY u.deptname, m.name
+        ORDER BY u.deptname, total_tokens DESC
+      `;
+    } else {
+      deptModelTokens = await prisma.$queryRaw`
+        SELECT u.deptname, m.name as model_name, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        INNER JOIN models m ON ul.model_id = m.id
+        WHERE u.loginid != 'anonymous'
+          AND u.deptname != ''
+        GROUP BY u.deptname, m.name
+        ORDER BY u.deptname, total_tokens DESC
+      `;
+    }
 
     // Combine into single response
     const deptUserMap = new Map(deptUsers.map((d) => [d.deptname, Number(d.user_count)]));

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, Filter, ChevronDown, Shield, Clock, Activity, Users, Building2, X } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, Filter, ChevronDown, Shield, Clock, Activity, Users, Building2, X, GripVertical } from 'lucide-react';
 import { unifiedUsersApi, serviceApi } from '../services/api';
 
 interface ServiceStat {
@@ -79,6 +79,22 @@ export default function UnifiedUsers() {
   const [editServicePermissions, setEditServicePermissions] = useState<{ serviceId: string; role: string }[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Column resize state
+  const [columnWidths, setColumnWidths] = useState({
+    user: 180,
+    dept: 160,
+    role: 200,
+    activity: 220,
+    requests: 150,
+    manage: 100,
+  });
+  const [resizing, setResizing] = useState<string | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
+
+  // Expanded rows for service details
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadUsers();
@@ -205,6 +221,48 @@ export default function UnifiedUsers() {
 
   const hasActiveFilters = search || serviceFilter || businessUnitFilter || roleFilter;
 
+  // Column resize handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent, column: string) => {
+    e.preventDefault();
+    setResizing(column);
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = columnWidths[column as keyof typeof columnWidths];
+  }, [columnWidths]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizing) return;
+    const diff = e.clientX - resizeStartX.current;
+    const newWidth = Math.max(80, resizeStartWidth.current + diff);
+    setColumnWidths(prev => ({ ...prev, [resizing]: newWidth }));
+  }, [resizing]);
+
+  const handleResizeEnd = useCallback(() => {
+    setResizing(null);
+  }, []);
+
+  useEffect(() => {
+    if (resizing) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [resizing, handleResizeMove, handleResizeEnd]);
+
+  const toggleExpanded = (userId: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -318,25 +376,73 @@ export default function UnifiedUsers() {
       {/* Users Table */}
       <div className="bg-white rounded-xl border border-pastel-200 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full table-fixed" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) }}>
             <thead>
               <tr className="bg-pastel-50 border-b border-pastel-200">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider relative select-none"
+                  style={{ width: columnWidths.user }}
+                >
                   사용자
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize flex items-center justify-center hover:bg-pastel-200"
+                    onMouseDown={(e) => handleResizeStart(e, 'user')}
+                  >
+                    <GripVertical className="w-3 h-3 text-pastel-400" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider relative select-none"
+                  style={{ width: columnWidths.dept }}
+                >
                   부서/사업부
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize flex items-center justify-center hover:bg-pastel-200"
+                    onMouseDown={(e) => handleResizeStart(e, 'dept')}
+                  >
+                    <GripVertical className="w-3 h-3 text-pastel-400" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider relative select-none"
+                  style={{ width: columnWidths.role }}
+                >
                   권한
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize flex items-center justify-center hover:bg-pastel-200"
+                    onMouseDown={(e) => handleResizeStart(e, 'role')}
+                  >
+                    <GripVertical className="w-3 h-3 text-pastel-400" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider relative select-none"
+                  style={{ width: columnWidths.activity }}
+                >
                   활동
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize flex items-center justify-center hover:bg-pastel-200"
+                    onMouseDown={(e) => handleResizeStart(e, 'activity')}
+                  >
+                    <GripVertical className="w-3 h-3 text-pastel-400" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-left text-xs font-semibold text-pastel-600 uppercase tracking-wider relative select-none"
+                  style={{ width: columnWidths.requests }}
+                >
                   요청수
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize flex items-center justify-center hover:bg-pastel-200"
+                    onMouseDown={(e) => handleResizeStart(e, 'requests')}
+                  >
+                    <GripVertical className="w-3 h-3 text-pastel-400" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-pastel-600 uppercase tracking-wider">
+                <th
+                  className="px-4 py-3 text-right text-xs font-semibold text-pastel-600 uppercase tracking-wider"
+                  style={{ width: columnWidths.manage }}
+                >
                   관리
                 </th>
               </tr>
@@ -405,18 +511,38 @@ export default function UnifiedUsers() {
                           <Activity className="w-3.5 h-3.5" />
                           <span>가입: {formatDate(user.firstSeen)}</span>
                         </div>
+                        {user.serviceStats.length > 1 && (
+                          <button
+                            onClick={() => toggleExpanded(user.id)}
+                            className="text-xs text-samsung-blue hover:underline mt-1"
+                          >
+                            {expandedRows.has(user.id) ? '접기 ▲' : `서비스별 보기 (${user.serviceStats.length}) ▼`}
+                          </button>
+                        )}
+                        {expandedRows.has(user.id) && (
+                          <div className="mt-2 pt-2 border-t border-pastel-100 space-y-1.5">
+                            {user.serviceStats.map(ss => (
+                              <div key={ss.serviceId} className="text-xs bg-pastel-50 p-2 rounded">
+                                <p className="font-medium text-pastel-700">{ss.serviceName}</p>
+                                <p className="text-pastel-500">가입: {formatDate(ss.firstSeen)}</p>
+                                <p className="text-pastel-500">최근: {formatDateTime(ss.lastActive)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium text-pastel-700">
                         {user.totalRequests.toLocaleString()}회
                       </div>
-                      {user.serviceStats.length > 1 && (
-                        <div className="mt-1 space-y-0.5">
-                          {user.serviceStats.slice(0, 3).map(ss => (
-                            <p key={ss.serviceId} className="text-xs text-pastel-500">
-                              {ss.serviceName}: {ss.requestCount.toLocaleString()}
-                            </p>
+                      {user.serviceStats.length > 1 && expandedRows.has(user.id) && (
+                        <div className="mt-2 pt-2 border-t border-pastel-100 space-y-1">
+                          {user.serviceStats.map(ss => (
+                            <div key={ss.serviceId} className="text-xs text-pastel-600 flex justify-between">
+                              <span>{ss.serviceName}:</span>
+                              <span className="font-medium">{ss.requestCount.toLocaleString()}회</span>
+                            </div>
                           ))}
                         </div>
                       )}

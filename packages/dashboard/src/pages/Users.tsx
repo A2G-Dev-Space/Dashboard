@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Search, ChevronLeft, ChevronRight, Shield, ShieldOff, ShieldCheck, Crown } from 'lucide-react';
+import { User, Search, ChevronLeft, ChevronRight, Shield, ShieldCheck, Crown } from 'lucide-react';
 import { usersApi, serviceApi } from '../services/api';
 
 /**
@@ -29,7 +29,7 @@ interface UserData {
 
 interface AdminStatus {
   isAdmin: boolean;
-  adminRole: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null;
+  adminRole: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
   isDeveloper: boolean;
   canModify: boolean;
 }
@@ -63,7 +63,6 @@ export default function Users({ serviceId }: UsersProps) {
   });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [promoting, setPromoting] = useState<string | null>(null);
 
   useEffect(() => {
     loadData(1);
@@ -99,37 +98,6 @@ export default function Users({ serviceId }: UsersProps) {
       console.error('Failed to load users:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePromote = async (userId: string, role: 'ADMIN' | 'VIEWER') => {
-    setPromoting(userId);
-    try {
-      await usersApi.promote(userId, role, serviceId);
-      // Reload admin status
-      const statusResponse = await usersApi.getAdminStatus(userId);
-      setAdminStatuses((prev) => ({ ...prev, [userId]: statusResponse.data }));
-    } catch (error) {
-      console.error('Failed to promote user:', error);
-      alert('승격에 실패했습니다.');
-    } finally {
-      setPromoting(null);
-    }
-  };
-
-  const handleDemote = async (userId: string) => {
-    if (!confirm('정말 관리자 권한을 해제하시겠습니까?')) return;
-    setPromoting(userId);
-    try {
-      await usersApi.demote(userId, serviceId);
-      // Reload admin status
-      const statusResponse = await usersApi.getAdminStatus(userId);
-      setAdminStatuses((prev) => ({ ...prev, [userId]: statusResponse.data }));
-    } catch (error) {
-      console.error('Failed to demote user:', error);
-      alert('권한 해제에 실패했습니다.');
-    } finally {
-      setPromoting(null);
     }
   };
 
@@ -169,20 +137,29 @@ export default function Users({ serviceId }: UsersProps) {
       );
     }
 
-    if (status.adminRole === 'ADMIN') {
+    if (status.adminRole === 'SERVICE_ADMIN') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
           <Shield className="w-3 h-3" />
-          관리자
+          서비스관리자
         </span>
       );
     }
 
     if (status.adminRole === 'VIEWER') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
           <Shield className="w-3 h-3" />
           뷰어
+        </span>
+      );
+    }
+
+    if (status.adminRole === 'SERVICE_VIEWER') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-cyan-100 text-cyan-700 rounded-full">
+          <Shield className="w-3 h-3" />
+          서비스뷰어
         </span>
       );
     }
@@ -250,15 +227,11 @@ export default function Users({ serviceId }: UsersProps) {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   요청 수
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  관리
-                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {filteredUsers.map((user) => {
                 const status = adminStatuses[user.id];
-                const isProcessing = promoting === user.id;
 
                 return (
                   <tr key={user.id} className="hover:bg-gray-50">
@@ -287,45 +260,12 @@ export default function Users({ serviceId }: UsersProps) {
                     <td className="px-6 py-4">
                       <p className="text-sm text-gray-600">{user._count.usageLogs.toLocaleString()}</p>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center justify-end gap-2">
-                        {isProcessing ? (
-                          <div className="w-5 h-5 border-2 border-samsung-blue border-t-transparent rounded-full animate-spin" />
-                        ) : status?.canModify === false ? (
-                          <span className="text-xs text-gray-400">수정 불가</span>
-                        ) : status?.isAdmin ? (
-                          <button
-                            onClick={() => handleDemote(user.id)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                          >
-                            <ShieldOff className="w-3.5 h-3.5" />
-                            권한 해제
-                          </button>
-                        ) : (
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => handlePromote(user.id, 'ADMIN')}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                            >
-                              <Shield className="w-3.5 h-3.5" />
-                              관리자
-                            </button>
-                            <button
-                              onClick={() => handlePromote(user.id, 'VIEWER')}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                              뷰어
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
                     {searchQuery ? '검색 결과가 없습니다.' : '사용자가 없습니다.'}
                   </td>
                 </tr>

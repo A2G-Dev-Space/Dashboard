@@ -17,8 +17,9 @@ export interface AuthenticatedRequest extends Request {
     user?: JWTPayload;
     userId?: string;
     isAdmin?: boolean;
-    adminRole?: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER';
+    adminRole?: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER';
     isDeveloper?: boolean;
+    adminId?: string;
 }
 /**
  * 개발자인지 확인 (환경변수 기반)
@@ -29,9 +30,9 @@ export declare function isDeveloper(loginid: string): boolean;
  */
 export declare function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction): void;
 /**
- * Check if user is an admin
+ * Check if user is an admin (any role)
  * 1. 환경변수 DEVELOPERS에 있으면 → SUPER_ADMIN
- * 2. DB admins 테이블에 있으면 → 해당 역할
+ * 2. DB admins 테이블에 있으면 → 해당 역할 (SUPER_ADMIN, SERVICE_ADMIN, VIEWER, SERVICE_VIEWER)
  */
 export declare function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void>;
 /**
@@ -47,4 +48,22 @@ export declare function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): str
  * Verify internally signed token
  */
 export declare function verifyInternalToken(token: string): JWTPayload | null;
+/**
+ * Check if user has write access (not VIEWER or SERVICE_VIEWER)
+ * Must be used after requireAdmin middleware
+ */
+export declare function requireWriteAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void;
+/**
+ * Check if user has access to a specific service
+ * SUPER_ADMIN/VIEWER → all services
+ * SERVICE_ADMIN/SERVICE_VIEWER → only assigned services
+ * Must be used after requireAdmin middleware
+ */
+export declare function requireServiceAccess(serviceIdParam?: string): (req: AuthenticatedRequest, res: Response, next: NextFunction) => Promise<void>;
+/**
+ * Get list of service IDs accessible by the current admin
+ * SUPER_ADMIN/VIEWER → null (all services)
+ * SERVICE_ADMIN/SERVICE_VIEWER → list of assigned service IDs
+ */
+export declare function getAccessibleServiceIds(req: AuthenticatedRequest): Promise<string[] | null>;
 //# sourceMappingURL=auth.d.ts.map

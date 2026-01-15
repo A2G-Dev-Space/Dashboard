@@ -3,6 +3,7 @@
  *
  * Endpoints for viewing personal usage statistics
  * - 일반 사용자가 본인의 사용량 통계를 조회
+ * - ?serviceId= 쿼리 파라미터로 서비스별 필터링 지원
  */
 import { Router } from 'express';
 import { prisma } from '../index.js';
@@ -11,8 +12,15 @@ export const myUsageRoutes = Router();
 // 인증 필수
 myUsageRoutes.use(authenticateToken);
 /**
+ * Helper: serviceId 필터 조건 생성
+ */
+function getServiceFilter(serviceId) {
+    return serviceId ? { serviceId } : {};
+}
+/**
  * GET /my-usage/summary
  * 내 사용량 요약 (오늘, 이번 주, 이번 달)
+ * Query: ?serviceId= (optional)
  */
 myUsageRoutes.get('/summary', async (req, res) => {
     try {
@@ -27,6 +35,8 @@ myUsageRoutes.get('/summary', async (req, res) => {
             res.status(404).json({ error: 'User not found' });
             return;
         }
+        const serviceId = req.query['serviceId'];
+        const serviceFilter = getServiceFilter(serviceId);
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const weekStart = new Date(todayStart);
@@ -37,6 +47,7 @@ myUsageRoutes.get('/summary', async (req, res) => {
             where: {
                 userId: user.id,
                 timestamp: { gte: todayStart },
+                ...serviceFilter,
             },
             _sum: {
                 inputTokens: true,
@@ -50,6 +61,7 @@ myUsageRoutes.get('/summary', async (req, res) => {
             where: {
                 userId: user.id,
                 timestamp: { gte: weekStart },
+                ...serviceFilter,
             },
             _sum: {
                 inputTokens: true,
@@ -63,6 +75,7 @@ myUsageRoutes.get('/summary', async (req, res) => {
             where: {
                 userId: user.id,
                 timestamp: { gte: monthStart },
+                ...serviceFilter,
             },
             _sum: {
                 inputTokens: true,
@@ -90,6 +103,7 @@ myUsageRoutes.get('/summary', async (req, res) => {
                 outputTokens: monthUsage._sum?.outputTokens ?? 0,
                 totalTokens: monthUsage._sum?.totalTokens ?? 0,
             },
+            serviceId: serviceId || null,
         });
     }
     catch (error) {
@@ -100,6 +114,7 @@ myUsageRoutes.get('/summary', async (req, res) => {
 /**
  * GET /my-usage/daily
  * 내 일별 사용량 (최근 N일)
+ * Query: ?serviceId= (optional), ?days=
  */
 myUsageRoutes.get('/daily', async (req, res) => {
     try {
@@ -114,24 +129,44 @@ myUsageRoutes.get('/daily', async (req, res) => {
             res.status(404).json({ error: 'User not found' });
             return;
         }
+        const serviceId = req.query['serviceId'];
         const days = parseInt(req.query['days']) || 30;
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
         startDate.setHours(0, 0, 0, 0);
         // 일별 집계
-        const dailyStats = await prisma.$queryRaw `
-      SELECT
-        DATE(timestamp) as date,
-        COUNT(*) as requests,
-        COALESCE(SUM("inputTokens"), 0) as input_tokens,
-        COALESCE(SUM("outputTokens"), 0) as output_tokens,
-        COALESCE(SUM("totalTokens"), 0) as total_tokens
-      FROM usage_logs
-      WHERE user_id = ${user.id}
-        AND timestamp >= ${startDate}
-      GROUP BY DATE(timestamp)
-      ORDER BY date ASC
-    `;
+        let dailyStats;
+        if (serviceId) {
+            dailyStats = await prisma.$queryRaw `
+        SELECT
+          DATE(timestamp) as date,
+          COUNT(*) as requests,
+          COALESCE(SUM("inputTokens"), 0) as input_tokens,
+          COALESCE(SUM("outputTokens"), 0) as output_tokens,
+          COALESCE(SUM("totalTokens"), 0) as total_tokens
+        FROM usage_logs
+        WHERE user_id = ${user.id}
+          AND timestamp >= ${startDate}
+          AND service_id = ${serviceId}::uuid
+        GROUP BY DATE(timestamp)
+        ORDER BY date ASC
+      `;
+        }
+        else {
+            dailyStats = await prisma.$queryRaw `
+        SELECT
+          DATE(timestamp) as date,
+          COUNT(*) as requests,
+          COALESCE(SUM("inputTokens"), 0) as input_tokens,
+          COALESCE(SUM("outputTokens"), 0) as output_tokens,
+          COALESCE(SUM("totalTokens"), 0) as total_tokens
+        FROM usage_logs
+        WHERE user_id = ${user.id}
+          AND timestamp >= ${startDate}
+        GROUP BY DATE(timestamp)
+        ORDER BY date ASC
+      `;
+        }
         // BigInt를 Number로 변환하고 날짜 포맷팅
         const stats = dailyStats.map(row => ({
             date: row.date instanceof Date
@@ -152,6 +187,7 @@ myUsageRoutes.get('/daily', async (req, res) => {
 /**
  * GET /my-usage/by-model
  * 내 모델별 사용량
+ * Query: ?serviceId= (optional), ?days=
  */
 myUsageRoutes.get('/by-model', async (req, res) => {
     try {
@@ -166,6 +202,7 @@ myUsageRoutes.get('/by-model', async (req, res) => {
             res.status(404).json({ error: 'User not found' });
             return;
         }
+        const serviceId = req.query['serviceId'];
         const days = parseInt(req.query['days']) || 30;
         const startDate = new Date();
         startDate.setDate(startDate.getDate() - days);
@@ -174,6 +211,7 @@ myUsageRoutes.get('/by-model', async (req, res) => {
             where: {
                 userId: user.id,
                 timestamp: { gte: startDate },
+                ...getServiceFilter(serviceId),
             },
             _sum: {
                 inputTokens: true,
@@ -205,8 +243,67 @@ myUsageRoutes.get('/by-model', async (req, res) => {
     }
 });
 /**
+ * GET /my-usage/by-service
+ * 내 서비스별 사용량 요약
+ */
+myUsageRoutes.get('/by-service', async (req, res) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ error: 'Authentication required' });
+            return;
+        }
+        const user = await prisma.user.findUnique({
+            where: { loginid: req.user.loginid },
+        });
+        if (!user) {
+            res.status(404).json({ error: 'User not found' });
+            return;
+        }
+        const days = parseInt(req.query['days']) || 30;
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        // 서비스별 집계
+        const usage = await prisma.usageLog.groupBy({
+            by: ['serviceId'],
+            where: {
+                userId: user.id,
+                timestamp: { gte: startDate },
+                serviceId: { not: null },
+            },
+            _sum: {
+                inputTokens: true,
+                outputTokens: true,
+                totalTokens: true,
+            },
+            _count: true,
+        });
+        // 서비스 정보 조회
+        const serviceIds = usage.map(u => u.serviceId).filter(Boolean);
+        const services = await prisma.service.findMany({
+            where: { id: { in: serviceIds } },
+            select: { id: true, name: true, displayName: true },
+        });
+        const serviceMap = new Map(services.map(s => [s.id, s]));
+        const result = usage.map(u => ({
+            serviceId: u.serviceId,
+            serviceName: serviceMap.get(u.serviceId)?.name || 'Unknown',
+            serviceDisplayName: serviceMap.get(u.serviceId)?.displayName || 'Unknown',
+            requests: u._count,
+            inputTokens: u._sum?.inputTokens ?? 0,
+            outputTokens: u._sum?.outputTokens ?? 0,
+            totalTokens: u._sum?.totalTokens ?? 0,
+        }));
+        res.json({ usage: result });
+    }
+    catch (error) {
+        console.error('Get my usage by service error:', error);
+        res.status(500).json({ error: 'Failed to get usage by service' });
+    }
+});
+/**
  * GET /my-usage/recent
  * 내 최근 사용 로그
+ * Query: ?serviceId= (optional), ?limit=, ?offset=
  */
 myUsageRoutes.get('/recent', async (req, res) => {
     try {
@@ -221,11 +318,16 @@ myUsageRoutes.get('/recent', async (req, res) => {
             res.status(404).json({ error: 'User not found' });
             return;
         }
+        const serviceId = req.query['serviceId'];
         const limit = Math.min(parseInt(req.query['limit']) || 50, 100);
         const offset = parseInt(req.query['offset']) || 0;
+        const whereClause = {
+            userId: user.id,
+            ...getServiceFilter(serviceId),
+        };
         const [logs, total] = await Promise.all([
             prisma.usageLog.findMany({
-                where: { userId: user.id },
+                where: whereClause,
                 orderBy: { timestamp: 'desc' },
                 take: limit,
                 skip: offset,
@@ -233,14 +335,19 @@ myUsageRoutes.get('/recent', async (req, res) => {
                     model: {
                         select: { displayName: true },
                     },
+                    service: {
+                        select: { id: true, name: true, displayName: true },
+                    },
                 },
             }),
-            prisma.usageLog.count({ where: { userId: user.id } }),
+            prisma.usageLog.count({ where: whereClause }),
         ]);
         res.json({
             logs: logs.map(log => ({
                 id: log.id,
                 modelName: log.model.displayName,
+                serviceName: log.service?.displayName || 'Unknown',
+                serviceId: log.serviceId,
                 inputTokens: log.inputTokens,
                 outputTokens: log.outputTokens,
                 totalTokens: log.totalTokens,
