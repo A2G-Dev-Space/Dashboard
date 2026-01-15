@@ -109,9 +109,9 @@ export default function Login({ onLogin }: LoginProps) {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-24 h-24 bg-white rounded-2xl mb-6 border border-pastel-200 shadow-lg overflow-hidden">
-            <img src="/logo.png" alt="Nexus Coder" className="w-20 h-20 object-contain" />
+            <img src="/logo.png" alt="AX Portal" className="w-20 h-20 object-contain" />
           </div>
-          <h1 className="text-3xl font-bold text-pastel-800 tracking-tight">Nexus Coder</h1>
+          <h1 className="text-3xl font-bold text-pastel-800 tracking-tight">AX Portal</h1>
           <p className="text-pastel-500 mt-2 text-sm">Portal</p>
         </div>
 
@@ -158,7 +158,7 @@ export default function Login({ onLogin }: LoginProps) {
 
         {/* Footer */}
         <p className="text-center text-xs text-pastel-500 mt-8">
-          &copy; 2026 Nexus Coder. Samsung DS Internal Use Only.
+          &copy; 2026 AX Portal. Samsung DS Internal Use Only.
         </p>
       </div>
     </div>
