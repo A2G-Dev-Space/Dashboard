@@ -10,7 +10,7 @@
 import { Router, RequestHandler } from 'express';
 import { prisma } from '../index.js';
 import { redis } from '../index.js';
-import { authenticateToken, requireAdmin, requireSuperAdmin, AuthenticatedRequest, isDeveloper } from '../middleware/auth.js';
+import { authenticateToken, requireAdmin, requireSuperAdmin, requireServiceAccess, requireWriteAccess, getAccessibleServiceIds, AuthenticatedRequest, isDeveloper } from '../middleware/auth.js';
 import { getActiveUserCount, getTodayUsage } from '../services/redis.service.js';
 import { z } from 'zod';
 
@@ -53,13 +53,33 @@ const modelSchema = z.object({
  * GET /admin/models
  * Get all models (including disabled)
  * Query: ?serviceId= (optional)
+ * - SUPER_ADMIN/VIEWER: all models or filtered by serviceId
+ * - SERVICE_ADMIN/SERVICE_VIEWER: only models from assigned services
  */
 adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
   try {
     const serviceId = req.query['serviceId'] as string | undefined;
 
+    // Get accessible service IDs for non-global admins
+    const accessibleServiceIds = await getAccessibleServiceIds(req);
+
+    // Build where clause
+    let whereClause: { serviceId?: string | { in: string[] } } = {};
+
+    if (serviceId) {
+      // If specific serviceId requested, check access
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(serviceId)) {
+        res.status(403).json({ error: 'No access to this service' });
+        return;
+      }
+      whereClause = { serviceId };
+    } else if (accessibleServiceIds !== null) {
+      // Filter to accessible services only
+      whereClause = { serviceId: { in: accessibleServiceIds } };
+    }
+
     const models = await prisma.model.findMany({
-      where: getServiceFilter(serviceId),
+      where: whereClause,
       include: {
         creator: {
           select: { loginid: true },
@@ -87,11 +107,14 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
 /**
  * POST /admin/models
  * Create a new model
+ * - VIEWER/SERVICE_VIEWER cannot create
+ * - SERVICE_ADMIN can only create for assigned services
  */
 adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
   try {
-    if (req.adminRole === 'VIEWER') {
-      res.status(403).json({ error: 'Viewers cannot create models' });
+    // Check write access
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot create models.' });
       return;
     }
 
@@ -99,6 +122,16 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
     if (!validation.success) {
       res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
       return;
+    }
+
+    // Check service access for SERVICE_ADMIN
+    const { serviceId } = validation.data;
+    if (serviceId && req.adminRole === 'SERVICE_ADMIN') {
+      const accessibleServiceIds = await getAccessibleServiceIds(req);
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(serviceId)) {
+        res.status(403).json({ error: 'No access to create models for this service' });
+        return;
+      }
     }
 
     const admin = await prisma.admin.findUnique({
@@ -122,15 +155,34 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
 /**
  * PUT /admin/models/:id
  * Update a model
+ * - VIEWER/SERVICE_VIEWER cannot update
+ * - SERVICE_ADMIN can only update models in assigned services
  */
 adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
   try {
-    if (req.adminRole === 'VIEWER') {
-      res.status(403).json({ error: 'Viewers cannot update models' });
+    // Check write access
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot update models.' });
       return;
     }
 
     const { id } = req.params;
+
+    // Check service access for SERVICE_ADMIN
+    if (req.adminRole === 'SERVICE_ADMIN') {
+      const existingModel = await prisma.model.findUnique({
+        where: { id },
+        select: { serviceId: true },
+      });
+      if (existingModel?.serviceId) {
+        const accessibleServiceIds = await getAccessibleServiceIds(req);
+        if (accessibleServiceIds !== null && !accessibleServiceIds.includes(existingModel.serviceId)) {
+          res.status(403).json({ error: 'No access to update this model' });
+          return;
+        }
+      }
+    }
+
     const validation = modelSchema.partial().safeParse(req.body);
     if (!validation.success) {
       res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
@@ -155,7 +207,14 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
  */
 adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
   try {
+    console.log('Delete model request:', {
+      loginid: req.user?.loginid,
+      adminRole: req.adminRole,
+      isDeveloper: req.isDeveloper,
+    });
+
     if (req.adminRole !== 'SUPER_ADMIN') {
+      console.log('Model delete rejected - not SUPER_ADMIN:', req.adminRole);
       res.status(403).json({ error: 'Only super admins can delete models' });
       return;
     }
@@ -299,13 +358,25 @@ adminRoutes.get('/admins', requireSuperAdmin as RequestHandler, async (_req: Aut
 /**
  * POST /admin/admins
  * Add new admin (super admin only)
+ * Body: { loginid, role, serviceId? }
+ * role: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER'
  */
 adminRoutes.post('/admins', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
   try {
     const { loginid, role, serviceId } = req.body;
+    const validRoles = ['SUPER_ADMIN', 'SERVICE_ADMIN', 'VIEWER', 'SERVICE_VIEWER'];
 
-    if (!loginid || !['ADMIN', 'VIEWER'].includes(role)) {
-      res.status(400).json({ error: 'Invalid request' });
+    if (!loginid || !validRoles.includes(role)) {
+      res.status(400).json({
+        error: 'Invalid request',
+        validRoles,
+      });
+      return;
+    }
+
+    // SERVICE_ADMIN and SERVICE_VIEWER require serviceId
+    if (['SERVICE_ADMIN', 'SERVICE_VIEWER'].includes(role) && !serviceId) {
+      res.status(400).json({ error: 'serviceId is required for SERVICE_ADMIN and SERVICE_VIEWER roles' });
       return;
     }
 
@@ -327,7 +398,21 @@ adminRoutes.post('/admins', requireSuperAdmin as RequestHandler, async (req: Aut
       });
     }
 
-    res.status(201).json({ admin });
+    // Return admin with services
+    const adminWithServices = await prisma.admin.findUnique({
+      where: { id: admin.id },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.status(201).json({ admin: adminWithServices });
   } catch (error) {
     console.error('Create admin error:', error);
     res.status(500).json({ error: 'Failed to create admin' });
@@ -349,12 +434,139 @@ adminRoutes.delete('/admins/:id', requireSuperAdmin as RequestHandler, async (re
       return;
     }
 
+    // Also delete AdminService entries
+    await prisma.adminService.deleteMany({ where: { adminId: id } });
     await prisma.admin.delete({ where: { id } });
 
     res.json({ success: true });
   } catch (error) {
     console.error('Delete admin error:', error);
     res.status(500).json({ error: 'Failed to delete admin' });
+  }
+});
+
+/**
+ * PUT /admin/admins/:id
+ * Update admin role (super admin only)
+ */
+adminRoutes.put('/admins/:id', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+    const validRoles = ['SUPER_ADMIN', 'SERVICE_ADMIN', 'VIEWER', 'SERVICE_VIEWER'];
+
+    if (!validRoles.includes(role)) {
+      res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      return;
+    }
+
+    const admin = await prisma.admin.update({
+      where: { id },
+      data: { role },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({ admin });
+  } catch (error) {
+    console.error('Update admin error:', error);
+    res.status(500).json({ error: 'Failed to update admin' });
+  }
+});
+
+/**
+ * POST /admin/admins/:id/services
+ * Add service to admin (super admin only)
+ * Body: { serviceId, role? }
+ */
+adminRoutes.post('/admins/:id/services', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { serviceId, role } = req.body;
+
+    if (!serviceId) {
+      res.status(400).json({ error: 'serviceId is required' });
+      return;
+    }
+
+    // Get admin's current role
+    const admin = await prisma.admin.findUnique({ where: { id } });
+    if (!admin) {
+      res.status(404).json({ error: 'Admin not found' });
+      return;
+    }
+
+    // Use provided role or default to admin's global role
+    const serviceRole = role || admin.role;
+
+    await prisma.adminService.upsert({
+      where: {
+        adminId_serviceId: { adminId: id, serviceId },
+      },
+      update: { role: serviceRole },
+      create: { adminId: id, serviceId, role: serviceRole },
+    });
+
+    // Return updated admin
+    const updatedAdmin = await prisma.admin.findUnique({
+      where: { id },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({ admin: updatedAdmin });
+  } catch (error) {
+    console.error('Add service to admin error:', error);
+    res.status(500).json({ error: 'Failed to add service to admin' });
+  }
+});
+
+/**
+ * DELETE /admin/admins/:id/services/:serviceId
+ * Remove service from admin (super admin only)
+ */
+adminRoutes.delete('/admins/:id/services/:serviceId', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id, serviceId } = req.params;
+
+    await prisma.adminService.delete({
+      where: {
+        adminId_serviceId: { adminId: id, serviceId },
+      },
+    });
+
+    // Return updated admin
+    const updatedAdmin = await prisma.admin.findUnique({
+      where: { id },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+
+    res.json({ admin: updatedAdmin });
+  } catch (error) {
+    console.error('Remove service from admin error:', error);
+    res.status(500).json({ error: 'Failed to remove service from admin' });
   }
 });
 
