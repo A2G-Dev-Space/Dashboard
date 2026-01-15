@@ -153,8 +153,8 @@ COPY tmp_logs FROM STDIN WITH (DELIMITER '|');
 INSERT INTO usage_logs (id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, service_id)
 SELECT t.id::uuid, t.user_id::uuid, t.model_id::uuid, t.input_tokens, t.output_tokens, t.total_tokens, t.timestamp, '$SERVICE_ID'::uuid
 FROM tmp_logs t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
-  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id::uuid)
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id::text = t.user_id)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id::text = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_logs;
 "
@@ -173,8 +173,8 @@ COPY tmp_stats FROM STDIN WITH (DELIMITER '|');
 INSERT INTO daily_usage_stats (id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", service_id)
 SELECT t.id::uuid, t.date, t.user_id::uuid, t.model_id::uuid, t.deptname, t.total_input, t.total_output, t.request_count, '$SERVICE_ID'::uuid
 FROM tmp_stats t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
-  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id::uuid)
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id::text = t.user_id)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id::text = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_stats;
 "
@@ -197,7 +197,7 @@ SELECT
     CASE WHEN t.images IS NOT NULL AND t.images != '' THEN string_to_array(t.images, ',') ELSE ARRAY[]::TEXT[] END,
     t.status::\"FeedbackStatus\", t.response, NULLIF(t.responded_by, '')::uuid, t.responded_at, t.created_at, t.updated_at, '$SERVICE_ID'::uuid
 FROM tmp_feedbacks t
-WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id::uuid)
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id::text = t.user_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_feedbacks;
 " 2>/dev/null || echo "  (No feedbacks or skipped)"
