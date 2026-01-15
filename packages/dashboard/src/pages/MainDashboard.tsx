@@ -559,7 +559,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             <h2 className="text-lg font-semibold text-gray-900">사업부별 사용자 추이</h2>
             <span className="text-xs text-gray-500">(최근 30일, Top 5 사업부 - 선: 누적, 막대: 일별 활성)</span>
           </div>
-          <div className="h-72">
+          <div className="h-72 mb-6">
             <Chart
               type="bar"
               data={deptUsersChartData}
@@ -621,6 +621,33 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
               }}
             />
           </div>
+          {/* Users Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-2 font-semibold text-gray-700">사업부</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">누적 사용자</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">일평균 활성</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deptUsersBUs.map((bu, index) => {
+                  const lastData = deptUsersDailyData[deptUsersDailyData.length - 1];
+                  const cumulative = lastData ? (lastData[`${bu}_cumulative`] as number) || 0 : 0;
+                  const activeSum = deptUsersDailyData.reduce((sum, d) => sum + ((d[`${bu}_active`] as number) || 0), 0);
+                  const avgActive = deptUsersDailyData.length > 0 ? activeSum / deptUsersDailyData.length : 0;
+                  return (
+                    <tr key={bu} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                      <td className="py-3 px-2 font-medium text-gray-900">{bu}</td>
+                      <td className="text-right py-3 px-2 text-gray-700">{formatNumber(cumulative)}</td>
+                      <td className="text-right py-3 px-2 text-gray-700">{avgActive.toFixed(1)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -632,7 +659,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             <h2 className="text-lg font-semibold text-gray-900">사업부+서비스별 API 요청 추이</h2>
             <span className="text-xs text-gray-500">(최근 30일, Top 10 조합)</span>
           </div>
-          <div className="h-72">
+          <div className="h-72 mb-6">
             <Line
               data={deptServiceRequestsChartData}
               options={{
@@ -677,6 +704,32 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                 },
               }}
             />
+          </div>
+          {/* API Requests Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-2 font-semibold text-gray-700">사업부</th>
+                  <th className="text-left py-3 px-2 font-semibold text-gray-700">서비스</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">총 요청수</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deptServiceCombos.map((combo, index) => {
+                  const [bu, service] = combo.split('/');
+                  const lastData = deptServiceRequestsData[deptServiceRequestsData.length - 1];
+                  const totalRequests = lastData ? (lastData[combo] as number) || 0 : 0;
+                  return (
+                    <tr key={combo} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                      <td className="py-3 px-2 font-medium text-gray-900">{bu}</td>
+                      <td className="py-3 px-2 text-gray-700">{service}</td>
+                      <td className="text-right py-3 px-2 text-gray-700">{formatNumber(totalRequests)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
