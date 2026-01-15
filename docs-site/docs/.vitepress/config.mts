@@ -5,18 +5,27 @@ const services = [
   {
     id: 'nexus-coder',
     name: 'Nexus Coder',
-    description: '삼성 DS를 위한 CLI Coding Agent',
-    basePath: '', // 기존 문서는 루트에 유지 (하위 호환성)
-    icon: '🚀'
+    description: 'Vibe Coding Tool for WSL',
+    basePath: '/nexus-coder',
+    icon: '🚀',
+    enabled: true,
   },
-  // 새 서비스 예시 (추가 시 주석 해제)
-  // {
-  //   id: 'other-service',
-  //   name: 'Other Service',
-  //   description: 'Another AI Service',
-  //   basePath: '/other-service',
-  //   icon: '🔧'
-  // }
+  {
+    id: 'nexus-coder-windows',
+    name: 'Nexus Coder for Windows',
+    description: 'Vibe Coding Tool for Windows',
+    basePath: '/nexus-coder-windows',
+    icon: '💻',
+    enabled: false, // Coming Soon
+  },
+  {
+    id: 'aipo',
+    name: 'Aipo',
+    description: 'Smart Posting App',
+    basePath: '/aipo',
+    icon: '✨',
+    enabled: false, // Coming Soon
+  },
 ]
 
 export default defineConfig({
@@ -51,11 +60,11 @@ export default defineConfig({
       {
         text: 'Services',
         items: services.map(s => ({
-          text: `${s.icon} ${s.name}`,
-          link: s.basePath ? `${s.basePath}/` : '/guide/getting-started'
+          text: `${s.icon} ${s.name}${s.enabled ? '' : ' (Coming Soon)'}`,
+          link: s.basePath
         }))
       },
-      { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Nexus Guide', link: '/guide/getting-started' },
       { text: 'Demos', link: '/demos/' },
       { text: 'Feedback', link: '/feedback', target: '_self' },
     ],
