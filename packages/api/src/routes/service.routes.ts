@@ -112,7 +112,7 @@ serviceRoutes.get(
  */
 serviceRoutes.get('/:id', authenticateToken, async (req: AuthenticatedRequest, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
 
     const service = await prisma.service.findUnique({
       where: { id },
@@ -187,7 +187,7 @@ serviceRoutes.put(
   requireSuperAdmin as RequestHandler,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       const validation = updateServiceSchema.safeParse(req.body);
       if (!validation.success) {
@@ -225,7 +225,7 @@ serviceRoutes.delete(
   requireSuperAdmin as RequestHandler,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       const existing = await prisma.service.findUnique({
         where: { id },
@@ -238,7 +238,7 @@ serviceRoutes.delete(
             },
           },
         },
-      });
+      }) as { _count: { models: number; usageLogs: number; feedbacks: number } } | null;
 
       if (!existing) {
         res.status(404).json({ error: 'Service not found' });
@@ -285,7 +285,7 @@ serviceRoutes.get(
   requireAdmin as RequestHandler,
   async (req: AuthenticatedRequest, res) => {
     try {
-      const { id } = req.params;
+      const id = req.params.id as string;
 
       // Verify service exists
       const service = await prisma.service.findUnique({ where: { id } });
@@ -336,9 +336,9 @@ serviceRoutes.get(
           totalModels,
           totalRequests,
           todayRequests,
-          totalInputTokens: tokenUsage._sum.inputTokens || 0,
-          totalOutputTokens: tokenUsage._sum.outputTokens || 0,
-          totalTokens: tokenUsage._sum.totalTokens || 0,
+          totalInputTokens: tokenUsage._sum?.inputTokens || 0,
+          totalOutputTokens: tokenUsage._sum?.outputTokens || 0,
+          totalTokens: tokenUsage._sum?.totalTokens || 0,
         },
       });
     } catch (error) {

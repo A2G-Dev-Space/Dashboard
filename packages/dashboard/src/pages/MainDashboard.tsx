@@ -293,7 +293,7 @@ export default function MainDashboard() {
                   y: {
                     beginAtZero: true,
                     ticks: {
-                      callback: (value) => formatNumber(Number(value)),
+                      callback: (value: string | number) => formatNumber(Number(value)),
                     },
                   },
                 },

@@ -110,8 +110,8 @@ export const statsApi = {
     api.get('/admin/stats/cumulative-users', { params: { days, serviceId } }),
   modelDailyTrend: (days = 30, serviceId?: string) =>
     api.get('/admin/stats/model-daily-trend', { params: { days, serviceId } }),
-  modelUserTrend: (modelId: string, days = 30, topN = 10) =>
-    api.get('/admin/stats/model-user-trend', { params: { modelId, days, topN } }),
+  modelUserTrend: (modelId: string, days = 30, topN = 10, serviceId?: string) =>
+    api.get('/admin/stats/model-user-trend', { params: { modelId, days, topN, serviceId } }),
 
   // Global stats (across all services)
   globalOverview: () => api.get('/admin/stats/global/overview'),

@@ -81,7 +81,7 @@ export default function MyUsage() {
         myUsageApi.summary(serviceId),
         myUsageApi.daily(days, serviceId),
         myUsageApi.byModel(days, serviceId),
-        myUsageApi.recent(20, serviceId),
+        myUsageApi.recent(20, 0, serviceId),
       ]);
 
       setSummary(summaryRes.data);
