@@ -59,7 +59,7 @@ export const modelsApi = {
   list: (serviceId?: string) => api.get('/admin/models', { params: { serviceId } }),
   create: (data: CreateModelData) => api.post('/admin/models', data),
   update: (id: string, data: Partial<CreateModelData>) => api.put(`/admin/models/${id}`, data),
-  delete: (id: string) => api.delete(`/admin/models/${id}`),
+  delete: (id: string, force = false) => api.delete(`/admin/models/${id}`, { params: { force } }),
 };
 
 export const usersApi = {

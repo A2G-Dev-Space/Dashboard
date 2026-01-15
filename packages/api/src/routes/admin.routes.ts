@@ -204,28 +204,53 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
 /**
  * DELETE /admin/models/:id
  * Delete a model
+ * Query: ?force=true - 사용 기록이 있어도 강제 삭제 (usage_logs도 함께 삭제)
  */
 adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
   try {
-    console.log('Delete model request:', {
-      loginid: req.user?.loginid,
-      adminRole: req.adminRole,
-      isDeveloper: req.isDeveloper,
-    });
-
     if (req.adminRole !== 'SUPER_ADMIN') {
-      console.log('Model delete rejected - not SUPER_ADMIN:', req.adminRole);
       res.status(403).json({ error: 'Only super admins can delete models' });
       return;
     }
 
     const { id } = req.params;
+    const force = req.query['force'] === 'true';
+
+    // Check if model has usage logs
+    const usageCount = await prisma.usageLog.count({
+      where: { modelId: id },
+    });
+
+    if (usageCount > 0 && !force) {
+      res.status(400).json({
+        error: `이 모델에 ${usageCount.toLocaleString()}개의 사용 기록이 있습니다. 삭제하려면 force=true 옵션을 사용하세요.`,
+        usageCount,
+        hint: 'Add ?force=true to delete model and all its usage logs',
+      });
+      return;
+    }
+
+    // If force delete, delete usage logs first
+    if (force && usageCount > 0) {
+      await prisma.usageLog.deleteMany({
+        where: { modelId: id },
+      });
+      console.log(`Force deleted ${usageCount} usage logs for model ${id}`);
+    }
+
+    // Also delete daily_usage_stats
+    await prisma.dailyUsageStats.deleteMany({
+      where: { modelId: id },
+    });
 
     await prisma.model.delete({
       where: { id },
     });
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      deletedUsageLogs: force ? usageCount : 0,
+    });
   } catch (error) {
     console.error('Delete model error:', error);
     res.status(500).json({ error: 'Failed to delete model' });

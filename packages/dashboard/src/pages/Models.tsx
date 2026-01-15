@@ -65,15 +65,35 @@ export default function Models({ serviceId }: ModelsProps) {
     setShowModal(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this model?')) return;
+  const handleDelete = async (id: string, force = false) => {
+    const model = models.find(m => m.id === id);
+    const modelName = model?.displayName || model?.name || 'this model';
+
+    if (!force && !confirm(`정말 "${modelName}" 모델을 삭제하시겠습니까?`)) return;
 
     try {
-      await modelsApi.delete(id);
+      await modelsApi.delete(id, force);
       setModels(models.filter((m) => m.id !== id));
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to delete model:', error);
-      alert('Failed to delete model. Only super admins can delete models.');
+
+      // Check if it's usage log constraint error
+      const axiosError = error as { response?: { data?: { usageCount?: number; error?: string } } };
+      const usageCount = axiosError.response?.data?.usageCount;
+      const errorMessage = axiosError.response?.data?.error;
+
+      if (usageCount && usageCount > 0) {
+        const forceDelete = confirm(
+          `${errorMessage}\n\n` +
+          `사용 기록 ${usageCount.toLocaleString()}개를 포함하여 강제 삭제하시겠습니까?\n` +
+          `⚠️ 이 작업은 되돌릴 수 없습니다.`
+        );
+        if (forceDelete) {
+          handleDelete(id, true);
+        }
+      } else {
+        alert(errorMessage || '모델 삭제에 실패했습니다.');
+      }
     }
   };
 
