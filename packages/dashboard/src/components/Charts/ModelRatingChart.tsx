@@ -95,13 +95,22 @@ export default function ModelRatingChart({ serviceId }: ModelRatingChartProps) {
     }
   };
 
-  // Get unique model names
+  // Get unique model names (sorted alphabetically for consistent ordering)
   const modelNames = useMemo(() => {
     const names = new Set<string>();
     dailyData.forEach((d) => names.add(d.modelName));
     modelStats.forEach((m) => names.add(m.modelName));
     return Array.from(names).sort();
   }, [dailyData, modelStats]);
+
+  // Create consistent color mapping based on modelNames order
+  const modelColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    modelNames.forEach((name, index) => {
+      map.set(name, MODEL_COLORS[index % MODEL_COLORS.length]);
+    });
+    return map;
+  }, [modelNames]);
 
   // Transform daily data into chart format with date padding
   const chartData = useMemo(() => {
@@ -200,12 +209,12 @@ export default function ModelRatingChart({ serviceId }: ModelRatingChartProps) {
       {/* Overall Stats Cards */}
       {modelStats.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          {modelStats.map((model, idx) => (
+          {modelStats.map((model) => (
             <div key={model.modelName} className="text-center p-3 bg-gray-50 rounded-xl">
               <p className="text-sm text-gray-500 truncate">{model.modelName}</p>
               <p
                 className="text-xl font-bold"
-                style={{ color: MODEL_COLORS[idx % MODEL_COLORS.length] }}
+                style={{ color: modelColorMap.get(model.modelName) || MODEL_COLORS[0] }}
               >
                 {model.averageRating !== null ? model.averageRating.toFixed(2) : '-'}
               </p>
@@ -253,13 +262,13 @@ export default function ModelRatingChart({ serviceId }: ModelRatingChartProps) {
                 labelFormatter={(label) => `Date: ${label}`}
               />
               <Legend />
-              {modelNames.map((modelName, index) => (
+              {modelNames.map((modelName) => (
                 <Line
                   key={modelName}
                   type="monotone"
                   dataKey={modelName}
                   name={modelName}
-                  stroke={MODEL_COLORS[index % MODEL_COLORS.length]}
+                  stroke={modelColorMap.get(modelName) || MODEL_COLORS[0]}
                   strokeWidth={2}
                   dot={{ r: 2 }}
                   activeDot={{ r: 4 }}
