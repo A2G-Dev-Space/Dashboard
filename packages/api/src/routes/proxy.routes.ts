@@ -19,6 +19,64 @@ const DEFAULT_USER = {
   deptname: 'Unknown',
 };
 
+// 기본 서비스 설정 (환경변수에서 가져오기)
+const DEFAULT_SERVICE_NAME = process.env['DEFAULT_SERVICE_NAME'] || process.env['DEFAULT_SERVICE_ID'] || 'nexus-coder';
+
+// 서비스 ID 캐시 (매 요청마다 DB 조회 방지)
+let cachedDefaultServiceId: string | null = null;
+
+/**
+ * 기본 서비스 ID 조회 (캐시 사용)
+ */
+async function getDefaultServiceId(): Promise<string | null> {
+  if (cachedDefaultServiceId) {
+    return cachedDefaultServiceId;
+  }
+
+  const service = await prisma.service.findFirst({
+    where: { name: DEFAULT_SERVICE_NAME },
+    select: { id: true },
+  });
+
+  if (service) {
+    cachedDefaultServiceId = service.id;
+    console.log(`[Service] Default service resolved: ${DEFAULT_SERVICE_NAME} -> ${service.id}`);
+  } else {
+    console.warn(`[Service] Default service '${DEFAULT_SERVICE_NAME}' not found in database`);
+  }
+
+  return cachedDefaultServiceId;
+}
+
+/**
+ * 요청에서 서비스 ID 추출
+ * X-Service-Id 헤더가 있으면 해당 서비스, 없으면 기본 서비스
+ */
+async function getServiceIdFromRequest(req: Request): Promise<string | null> {
+  const serviceHeader = req.headers['x-service-id'] as string | undefined;
+
+  if (serviceHeader) {
+    // 헤더에 서비스가 지정된 경우 해당 서비스 조회
+    const service = await prisma.service.findFirst({
+      where: {
+        OR: [
+          { id: serviceHeader },
+          { name: serviceHeader },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (service) {
+      return service.id;
+    }
+    console.warn(`[Service] Service '${serviceHeader}' from header not found, using default`);
+  }
+
+  // 헤더가 없거나 찾지 못한 경우 기본 서비스 사용
+  return getDefaultServiceId();
+}
+
 /**
  * 사용자 조회 또는 생성 (upsert)
  * X-User-Id 헤더가 있으면 해당 사용자, 없으면 기본 사용자
@@ -52,7 +110,8 @@ async function recordUsage(
   loginid: string,
   modelId: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  serviceId: string | null
 ) {
   const totalTokens = inputTokens + outputTokens;
 
@@ -64,6 +123,7 @@ async function recordUsage(
       inputTokens,
       outputTokens,
       totalTokens,
+      serviceId,
     },
   });
 
@@ -73,7 +133,7 @@ async function recordUsage(
   // 활성 사용자 추적
   await trackActiveUser(redis, loginid);
 
-  console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
+  console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
 }
 
 /**
@@ -175,6 +235,9 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     // Get or create user for usage tracking
     const user = await getOrCreateUser(req);
 
+    // Get service ID from header or use default
+    const serviceId = await getServiceIdFromRequest(req);
+
     // Prepare request to actual LLM
     const llmRequestBody = {
       model: model.name,
@@ -193,9 +256,9 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
 
     // Handle streaming
     if (stream) {
-      await handleStreamingRequest(res, model, llmRequestBody, headers, user);
+      await handleStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
     } else {
-      await handleNonStreamingRequest(res, model, llmRequestBody, headers, user);
+      await handleNonStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
     }
 
   } catch (error) {
@@ -212,7 +275,8 @@ async function handleNonStreamingRequest(
   model: { id: string; name: string; endpointUrl: string; apiKey: string | null },
   requestBody: any,
   headers: Record<string, string>,
-  user: { id: string; loginid: string }
+  user: { id: string; loginid: string },
+  serviceId: string | null
 ) {
   try {
     const url = buildChatCompletionsUrl(model.endpointUrl);
@@ -242,7 +306,7 @@ async function handleNonStreamingRequest(
       const outputTokens = data.usage.completion_tokens || 0;
 
       // 비동기로 usage 저장 (응답 지연 방지)
-      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens).catch((err) => {
+      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
         console.error('[Usage] Failed to record usage:', err);
       });
     }
@@ -265,7 +329,8 @@ async function handleStreamingRequest(
   model: { id: string; name: string; endpointUrl: string; apiKey: string | null },
   requestBody: any,
   headers: Record<string, string>,
-  user: { id: string; loginid: string }
+  user: { id: string; loginid: string },
+  serviceId: string | null
 ) {
   try {
     const url = buildChatCompletionsUrl(model.endpointUrl);
@@ -371,7 +436,7 @@ async function handleStreamingRequest(
       const inputTokens = usageData.prompt_tokens || 0;
       const outputTokens = usageData.completion_tokens || 0;
 
-      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens).catch((err) => {
+      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
         console.error('[Usage] Failed to record streaming usage:', err);
       });
     } else {
