@@ -35,7 +35,7 @@ function decodeUnicodeEscape(str: string): string {
   }
 }
 
-type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null;
+type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -95,6 +95,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
   // Determine current page label
   const getCurrentPageLabel = () => {
     if (location.pathname === '/') return '통합 대시보드';
+    if (location.pathname === '/users') return '사용자 관리';
     if (location.pathname === '/my-usage') return '내 사용량';
     if (location.pathname === '/feedback') return '피드백';
     if (location.pathname.startsWith('/service/')) {
@@ -107,9 +108,10 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
   };
 
   // 역할 표시 텍스트
-  const roleLabel = adminRole === 'SUPER_ADMIN' ? '개발자' :
-                    adminRole === 'ADMIN' ? '관리자' :
-                    adminRole === 'VIEWER' ? '뷰어' : '사용자';
+  const roleLabel = adminRole === 'SUPER_ADMIN' ? '슈퍼관리자' :
+                    adminRole === 'SERVICE_ADMIN' ? '서비스관리자' :
+                    adminRole === 'VIEWER' ? '뷰어' :
+                    adminRole === 'SERVICE_VIEWER' ? '서비스뷰어' : '사용자';
 
   return (
     <div className="min-h-screen bg-pastel-50">
@@ -165,6 +167,22 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
                 <span className="font-medium">통합 대시보드</span>
                 {location.pathname === '/' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
               </Link>
+              {/* SUPER_ADMIN만 통합 사용자 관리 */}
+              {adminRole === 'SUPER_ADMIN' && (
+                <Link
+                  to="/users"
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all duration-200 group ${
+                    location.pathname === '/users'
+                      ? 'bg-pastel-100 text-pastel-700 shadow-sm'
+                      : 'text-pastel-600 hover:bg-pastel-50 hover:text-pastel-700'
+                  }`}
+                >
+                  <Users className={`w-5 h-5 ${location.pathname === '/users' ? 'text-samsung-blue' : 'text-pastel-400 group-hover:text-pastel-600'}`} />
+                  <span className="font-medium">사용자 관리</span>
+                  {location.pathname === '/users' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
+                </Link>
+              )}
             </div>
           )}
 

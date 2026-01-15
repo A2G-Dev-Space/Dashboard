@@ -5,6 +5,7 @@ import MainDashboard from './pages/MainDashboard';
 import Dashboard from './pages/Dashboard';
 import Models from './pages/Models';
 import Users from './pages/Users';
+import UnifiedUsers from './pages/UnifiedUsers';
 import Feedback from './pages/Feedback';
 import MyUsage from './pages/MyUsage';
 import Login from './pages/Login';
@@ -17,7 +18,7 @@ interface User {
   deptname: string;
 }
 
-type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null;
+type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
 // Wrapper components to pass serviceId prop from URL params
 function ServiceDashboardWrapper() {
@@ -108,6 +109,11 @@ function App() {
           <>
             {/* 통합 대시보드 (메인) */}
             <Route path="/" element={<MainDashboard adminRole={adminRole} />} />
+
+            {/* 통합 사용자 관리 (SUPER_ADMIN만) */}
+            {adminRole === 'SUPER_ADMIN' && (
+              <Route path="/users" element={<UnifiedUsers />} />
+            )}
 
             {/* 서비스별 라우트 */}
             <Route path="/service/:serviceId" element={<ServiceDashboardWrapper />} />

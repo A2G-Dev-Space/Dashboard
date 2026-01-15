@@ -1421,3 +1421,308 @@ adminRoutes.delete('/users/:id/demote', requireSuperAdmin as RequestHandler, asy
     res.status(500).json({ error: 'Failed to demote user' });
   }
 });
+
+// ==================== Unified Users Management ====================
+
+/**
+ * GET /admin/unified-users
+ * 통합 사용자 관리 목록
+ * Query: ?page=, ?limit=, ?serviceId=, ?businessUnit=, ?deptname=, ?role=, ?search=
+ */
+adminRoutes.get('/unified-users', async (req: AuthenticatedRequest, res) => {
+  try {
+    const page = parseInt(req.query['page'] as string) || 1;
+    const limit = parseInt(req.query['limit'] as string) || 50;
+    const skip = (page - 1) * limit;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const businessUnit = req.query['businessUnit'] as string | undefined;
+    const deptname = req.query['deptname'] as string | undefined;
+    const role = req.query['role'] as string | undefined;
+    const search = req.query['search'] as string | undefined;
+
+    // Build where clause
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const whereClause: any = {
+      loginid: { not: 'anonymous' },
+    };
+
+    if (businessUnit) {
+      whereClause['businessUnit'] = businessUnit;
+    }
+
+    if (deptname) {
+      whereClause['deptname'] = { contains: deptname, mode: 'insensitive' };
+    }
+
+    if (search) {
+      whereClause['OR'] = [
+        { loginid: { contains: search, mode: 'insensitive' } },
+        { username: { contains: search, mode: 'insensitive' } },
+        { deptname: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // If serviceId filter, only users with activity in that service
+    if (serviceId) {
+      whereClause['userServices'] = {
+        some: { serviceId },
+      };
+    }
+
+    // Get users with pagination
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        where: whereClause,
+        skip,
+        take: limit,
+        orderBy: { lastActive: 'desc' },
+        include: {
+          userServices: {
+            include: {
+              service: {
+                select: { id: true, name: true, displayName: true },
+              },
+            },
+          },
+        },
+      }),
+      prisma.user.count({ where: whereClause }),
+    ]);
+
+    // Get admin info for all users
+    const loginids = users.map((u) => u.loginid);
+    const admins = await prisma.admin.findMany({
+      where: { loginid: { in: loginids } },
+      include: {
+        adminServices: {
+          include: {
+            service: {
+              select: { id: true, name: true, displayName: true },
+            },
+          },
+        },
+      },
+    });
+    const adminMap = new Map(admins.map((a) => [a.loginid, a]));
+
+    // Get developers from env
+    const developers = (process.env['DEVELOPERS'] || '').split(',').map((d) => d.trim()).filter(Boolean);
+
+    // Map users with role info
+    const usersWithRoles = users.map((user) => {
+      const admin = adminMap.get(user.loginid);
+      const isEnvDeveloper = developers.includes(user.loginid);
+
+      let globalRole: string | null = null;
+      let servicePermissions: Array<{ serviceId: string; serviceName: string; role: string }> = [];
+
+      if (isEnvDeveloper) {
+        globalRole = 'SUPER_ADMIN';
+      } else if (admin) {
+        globalRole = admin.role;
+        servicePermissions = admin.adminServices.map((as) => ({
+          serviceId: as.serviceId,
+          serviceName: as.service.displayName,
+          role: as.role,
+        }));
+      }
+
+      // Service stats from userServices
+      const serviceStats = user.userServices.map((us) => ({
+        serviceId: us.serviceId,
+        serviceName: us.service.displayName,
+        firstSeen: us.firstSeen,
+        lastActive: us.lastActive,
+        requestCount: us.requestCount,
+      }));
+
+      const totalRequests = serviceStats.reduce((sum, s) => sum + s.requestCount, 0);
+
+      return {
+        id: user.id,
+        loginid: user.loginid,
+        username: user.username,
+        deptname: user.deptname,
+        businessUnit: user.businessUnit,
+        globalRole,
+        isEnvDeveloper,
+        servicePermissions,
+        serviceStats,
+        totalRequests,
+        firstSeen: user.firstSeen,
+        lastActive: user.lastActive,
+      };
+    });
+
+    // Filter by role if specified
+    let filteredUsers = usersWithRoles;
+    if (role) {
+      if (role === 'USER') {
+        filteredUsers = usersWithRoles.filter((u) => !u.globalRole);
+      } else {
+        filteredUsers = usersWithRoles.filter((u) => u.globalRole === role);
+      }
+    }
+
+    // Get filter options
+    const [services, businessUnits, deptnames] = await Promise.all([
+      prisma.service.findMany({
+        where: { enabled: true },
+        select: { id: true, name: true, displayName: true },
+      }),
+      prisma.user.groupBy({
+        by: ['businessUnit'],
+        where: {
+          businessUnit: { not: null },
+          loginid: { not: 'anonymous' },
+        },
+        _count: true,
+      }),
+      prisma.user.groupBy({
+        by: ['deptname'],
+        where: {
+          deptname: { not: '' },
+          loginid: { not: 'anonymous' },
+        },
+        _count: true,
+        orderBy: { _count: { deptname: 'desc' } },
+        take: 50,
+      }),
+    ]);
+
+    res.json({
+      users: filteredUsers,
+      pagination: {
+        page,
+        limit,
+        total: role ? filteredUsers.length : total,
+        totalPages: Math.ceil((role ? filteredUsers.length : total) / limit),
+      },
+      filterOptions: {
+        services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
+        businessUnits: businessUnits
+          .filter((b) => b.businessUnit)
+          .map((b) => b.businessUnit!)
+          .sort(),
+        deptnames: deptnames.map((d) => d.deptname).sort(),
+        roles: ['SUPER_ADMIN', 'SERVICE_ADMIN', 'VIEWER', 'SERVICE_VIEWER', 'USER'],
+      },
+    });
+  } catch (error) {
+    console.error('Get unified users error:', error);
+    res.status(500).json({ error: 'Failed to get unified users' });
+  }
+});
+
+/**
+ * PUT /admin/unified-users/:id/permissions
+ * 사용자 권한 변경 (SUPER_ADMIN만)
+ * Body: { globalRole?: string, servicePermissions?: [{ serviceId, role }] }
+ */
+adminRoutes.put('/unified-users/:id/permissions', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { id } = req.params;
+    const { globalRole, servicePermissions } = req.body;
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { loginid: true, username: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Check if env developer
+    if (isDeveloper(user.loginid)) {
+      res.status(400).json({ error: 'Cannot modify environment developer permissions' });
+      return;
+    }
+
+    // Validate role
+    const validRoles = ['SUPER_ADMIN', 'SERVICE_ADMIN', 'VIEWER', 'SERVICE_VIEWER'];
+    if (globalRole && !validRoles.includes(globalRole)) {
+      res.status(400).json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      return;
+    }
+
+    // Get or create admin record
+    let admin = await prisma.admin.findUnique({
+      where: { loginid: user.loginid },
+    });
+
+    if (globalRole) {
+      // Update or create admin with global role
+      admin = await prisma.admin.upsert({
+        where: { loginid: user.loginid },
+        update: { role: globalRole },
+        create: {
+          loginid: user.loginid,
+          role: globalRole,
+        },
+      });
+    } else if (admin && !servicePermissions?.length) {
+      // Remove admin entirely if no role and no service permissions
+      await prisma.admin.delete({
+        where: { loginid: user.loginid },
+      });
+      admin = null;
+    }
+
+    // Update service permissions
+    if (admin && servicePermissions && Array.isArray(servicePermissions)) {
+      // Remove existing service permissions
+      await prisma.adminService.deleteMany({
+        where: { adminId: admin.id },
+      });
+
+      // Add new service permissions
+      for (const sp of servicePermissions) {
+        if (sp.serviceId && sp.role) {
+          await prisma.adminService.create({
+            data: {
+              adminId: admin.id,
+              serviceId: sp.serviceId,
+              role: sp.role,
+            },
+          });
+        }
+      }
+    }
+
+    // Get updated admin with services
+    const updatedAdmin = admin
+      ? await prisma.admin.findUnique({
+          where: { id: admin.id },
+          include: {
+            adminServices: {
+              include: {
+                service: {
+                  select: { id: true, name: true, displayName: true },
+                },
+              },
+            },
+          },
+        })
+      : null;
+
+    res.json({
+      success: true,
+      user: {
+        id: user.loginid,
+        username: user.username,
+        globalRole: updatedAdmin?.role || null,
+        servicePermissions: updatedAdmin?.adminServices.map((as) => ({
+          serviceId: as.serviceId,
+          serviceName: as.service.displayName,
+          role: as.role,
+        })) || [],
+      },
+    });
+  } catch (error) {
+    console.error('Update user permissions error:', error);
+    res.status(500).json({ error: 'Failed to update permissions' });
+  }
+});

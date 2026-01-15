@@ -27,6 +27,7 @@ model Service {
   feedbacks       Feedback[]
   ratingFeedbacks RatingFeedback[]
   adminServices   AdminService[]
+  userServices    UserService[]  // 서비스별 사용자 활동
 
   @@map("services")
 }
@@ -35,19 +36,42 @@ model Service {
 // 사용자 모델
 // ============================================
 model User {
-  id         String   @id @default(uuid())
-  loginid    String   @unique
-  username   String
-  deptname   String   @default("")
-  firstSeen  DateTime @default(now())
-  lastActive DateTime @default(now())
-  isActive   Boolean  @default(true)
+  id           String   @id @default(uuid())
+  loginid      String   @unique
+  username     String
+  deptname     String   @default("")
+  businessUnit String?  @map("business_unit")  // deptname에서 추출 (예: "DS/AI팀" → "DS")
+  firstSeen    DateTime @default(now())
+  lastActive   DateTime @default(now())
+  isActive     Boolean  @default(true)
 
   usageLogs       UsageLog[]
   dailyUsageStats DailyUsageStat[]
   feedbacks       Feedback[]
+  userServices    UserService[]  // 서비스별 활동 추적
 
   @@map("users")
+}
+
+// ============================================
+// 사용자-서비스 활동 추적 (서비스별 가입일/마지막활동)
+// ============================================
+model UserService {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  serviceId    String   @map("service_id")
+  firstSeen    DateTime @map("first_seen")      // 첫 활동일 (가입일)
+  lastActive   DateTime @map("last_active")     // 마지막 활동일
+  requestCount Int      @default(0) @map("request_count")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, serviceId])
+  @@index([userId])
+  @@index([serviceId])
+  @@index([lastActive])
+  @@map("user_services")
 }
 
 // ============================================
@@ -83,7 +107,7 @@ model Model {
 model Admin {
   id        String    @id @default(uuid())
   loginid   String    @unique
-  role      AdminRole @default(ADMIN)        // 전역 역할 (레거시 호환)
+  role      AdminRole @default(SERVICE_ADMIN)        // 전역 역할 (레거시 호환)
   createdAt DateTime  @default(now())
 
   models        Model[]
@@ -101,7 +125,7 @@ model AdminService {
   id        String    @id @default(uuid())
   adminId   String    @map("admin_id")
   serviceId String    @map("service_id")
-  role      AdminRole @default(ADMIN)        // 서비스별 역할
+  role      AdminRole @default(SERVICE_ADMIN)        // 서비스별 역할
   createdAt DateTime  @default(now()) @map("created_at")
 
   admin   Admin   @relation(fields: [adminId], references: [id], onDelete: Cascade)
@@ -114,9 +138,10 @@ model AdminService {
 }
 
 enum AdminRole {
-  SUPER_ADMIN
-  ADMIN
-  VIEWER
+  SUPER_ADMIN      // 모든 서비스 접근 (모델/대시보드/사용자 관리)
+  SERVICE_ADMIN    // 특정 서비스(들) 접근 (여러 서비스 가능)
+  VIEWER           // 모든 대시보드 읽기 전용
+  SERVICE_VIEWER   // 특정 서비스 대시보드만 읽기 전용
 }
 
 // ============================================

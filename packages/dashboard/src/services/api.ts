@@ -134,6 +134,28 @@ export const ratingApi = {
   stats: (days = 30, serviceId?: string) => api.get('/rating/stats', { params: { days, serviceId } }),
 };
 
+// 통합 사용자 관리 API
+export interface UnifiedUserFilters {
+  page?: number;
+  limit?: number;
+  serviceId?: string;
+  businessUnit?: string;
+  deptname?: string;
+  role?: string;
+  search?: string;
+}
+
+export interface ServicePermission {
+  serviceId: string;
+  role: string;
+}
+
+export const unifiedUsersApi = {
+  list: (filters?: UnifiedUserFilters) => api.get('/admin/unified-users', { params: filters }),
+  updatePermissions: (id: string, data: { globalRole?: string; servicePermissions?: ServicePermission[] }) =>
+    api.put(`/admin/unified-users/${id}/permissions`, data),
+};
+
 interface CreateModelData {
   name: string;
   displayName: string;

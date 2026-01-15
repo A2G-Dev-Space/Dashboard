@@ -82,6 +82,16 @@ async function getServiceIdFromRequest(req: Request): Promise<{ serviceId: strin
 }
 
 /**
+ * deptname에서 businessUnit 추출
+ * "DS/AI팀" → "DS", "메모리사업부/설계팀" → "메모리사업부"
+ */
+function extractBusinessUnit(deptname: string): string {
+  if (!deptname) return '';
+  const parts = deptname.split('/');
+  return parts[0]?.trim() || '';
+}
+
+/**
  * 사용자 조회 또는 생성 (upsert)
  * X-User-Id 헤더가 있으면 해당 사용자, 없으면 기본 사용자
  */
@@ -89,17 +99,20 @@ async function getOrCreateUser(req: Request) {
   const loginid = (req.headers['x-user-id'] as string) || DEFAULT_USER.loginid;
   const username = (req.headers['x-user-name'] as string) || DEFAULT_USER.username;
   const deptname = (req.headers['x-user-dept'] as string) || DEFAULT_USER.deptname;
+  const businessUnit = extractBusinessUnit(deptname);
 
   const user = await prisma.user.upsert({
     where: { loginid },
     update: {
       lastActive: new Date(),
       deptname,  // 조직개편 시 자동 갱신
+      businessUnit,
     },
     create: {
       loginid,
       username,
       deptname,
+      businessUnit,
     },
   });
 
@@ -107,7 +120,7 @@ async function getOrCreateUser(req: Request) {
 }
 
 /**
- * Usage 저장 (DB + Redis)
+ * Usage 저장 (DB + Redis + UserService)
  */
 async function recordUsage(
   userId: string,
@@ -130,6 +143,29 @@ async function recordUsage(
       serviceId,
     },
   });
+
+  // UserService 업데이트 (서비스별 사용자 활동 추적)
+  if (serviceId) {
+    await prisma.userService.upsert({
+      where: {
+        userId_serviceId: {
+          userId,
+          serviceId,
+        },
+      },
+      update: {
+        lastActive: new Date(),
+        requestCount: { increment: 1 },
+      },
+      create: {
+        userId,
+        serviceId,
+        firstSeen: new Date(),
+        lastActive: new Date(),
+        requestCount: 1,
+      },
+    });
+  }
 
   // Redis 카운터 업데이트
   await incrementUsage(redis, userId, modelId, inputTokens, outputTokens);

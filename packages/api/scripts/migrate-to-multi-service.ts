@@ -167,7 +167,114 @@ async function main() {
     console.log('  ✓ All admin-service entries already exist');
   }
 
-  // Step 8: 통계 출력
+  // Step 8: 기존 ADMIN → SUPER_ADMIN 마이그레이션
+  console.log('\nStep 8: Upgrading existing ADMIN to SUPER_ADMIN...');
+  // Note: 기존 ADMIN enum 값이 있는 경우를 위한 raw query
+  // Prisma enum이 변경되었으므로 raw SQL 사용
+  const adminsUpgraded = await prisma.$executeRaw`
+    UPDATE admins
+    SET role = 'SUPER_ADMIN'
+    WHERE role = 'ADMIN'
+  `;
+  if (Number(adminsUpgraded) > 0) {
+    console.log(`  ✓ Upgraded ${adminsUpgraded} admins to SUPER_ADMIN`);
+  } else {
+    console.log('  ✓ No ADMIN roles to upgrade (already migrated or none exist)');
+  }
+
+  // AdminService의 ADMIN → SUPER_ADMIN도 업그레이드
+  const adminServicesUpgraded = await prisma.$executeRaw`
+    UPDATE admin_services
+    SET role = 'SUPER_ADMIN'
+    WHERE role = 'ADMIN'
+  `;
+  if (Number(adminServicesUpgraded) > 0) {
+    console.log(`  ✓ Upgraded ${adminServicesUpgraded} admin-service entries to SUPER_ADMIN`);
+  }
+
+  // Step 9: UserService 백필 (usage_logs에서 서비스별 첫활동/마지막활동 추출)
+  console.log('\nStep 9: Backfilling UserService from usage_logs...');
+  const userServiceStats = await prisma.$queryRaw<Array<{
+    user_id: string;
+    service_id: string;
+    first_seen: Date;
+    last_active: Date;
+    request_count: bigint;
+  }>>`
+    SELECT
+      user_id,
+      service_id,
+      MIN(timestamp) as first_seen,
+      MAX(timestamp) as last_active,
+      COUNT(*) as request_count
+    FROM usage_logs
+    WHERE service_id IS NOT NULL
+    GROUP BY user_id, service_id
+  `;
+
+  let userServicesCreated = 0;
+  let userServicesUpdated = 0;
+  for (const stat of userServiceStats) {
+    const existing = await prisma.userService.findUnique({
+      where: {
+        userId_serviceId: {
+          userId: stat.user_id,
+          serviceId: stat.service_id,
+        },
+      },
+    });
+
+    if (existing) {
+      await prisma.userService.update({
+        where: { id: existing.id },
+        data: {
+          lastActive: stat.last_active,
+          requestCount: Number(stat.request_count),
+        },
+      });
+      userServicesUpdated++;
+    } else {
+      await prisma.userService.create({
+        data: {
+          userId: stat.user_id,
+          serviceId: stat.service_id,
+          firstSeen: stat.first_seen,
+          lastActive: stat.last_active,
+          requestCount: Number(stat.request_count),
+        },
+      });
+      userServicesCreated++;
+    }
+  }
+  console.log(`  ✓ Created ${userServicesCreated} UserService records`);
+  if (userServicesUpdated > 0) {
+    console.log(`  ✓ Updated ${userServicesUpdated} existing UserService records`);
+  }
+
+  // Step 10: businessUnit 추출
+  console.log('\nStep 10: Extracting businessUnit from deptname...');
+  const usersForBusinessUnit = await prisma.user.findMany({
+    where: { businessUnit: null },
+  });
+
+  let businessUnitsUpdated = 0;
+  for (const user of usersForBusinessUnit) {
+    const businessUnit = extractBusinessUnit(user.deptname);
+    if (businessUnit) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { businessUnit },
+      });
+      businessUnitsUpdated++;
+    }
+  }
+  if (businessUnitsUpdated > 0) {
+    console.log(`  ✓ Updated ${businessUnitsUpdated} users with businessUnit`);
+  } else {
+    console.log('  ✓ No users need businessUnit update');
+  }
+
+  // Step 11: 통계 출력
   console.log('\n📊 Migration Summary:');
   const totalServices = await prisma.service.count();
   const totalModels = await prisma.model.count();
@@ -176,6 +283,7 @@ async function main() {
   const totalStats = await prisma.dailyUsageStat.count();
   const totalFeedbacks = await prisma.feedback.count();
   const totalAdminServices = await prisma.adminService.count();
+  const totalUserServices = await prisma.userService.count();
 
   console.log(`  - Services: ${totalServices}`);
   console.log(`  - Models: ${totalModels}`);
@@ -184,12 +292,30 @@ async function main() {
   console.log(`  - Daily Stats: ${totalStats}`);
   console.log(`  - Feedbacks: ${totalFeedbacks}`);
   console.log(`  - Admin-Service entries: ${totalAdminServices}`);
+  console.log(`  - User-Service entries: ${totalUserServices}`);
+
+  // 권한 분포 출력
+  const adminRoleCounts = await prisma.$queryRaw<Array<{ role: string; count: bigint }>>`
+    SELECT role, COUNT(*) as count FROM admins GROUP BY role
+  `;
+  console.log('\n📋 Admin Role Distribution:');
+  for (const { role, count } of adminRoleCounts) {
+    console.log(`  - ${role}: ${count}`);
+  }
 
   console.log('\n✅ Migration completed successfully!');
   console.log('\n⚠️  Next steps:');
   console.log('  1. Verify data integrity in the database');
   console.log('  2. Update schema to make serviceId NOT NULL (optional, for stricter enforcement)');
   console.log('  3. Deploy updated API and Dashboard');
+}
+
+// Helper function: deptname에서 businessUnit 추출
+function extractBusinessUnit(deptname: string): string {
+  if (!deptname) return '';
+  // "DS/AI팀" → "DS", "메모리사업부/설계팀" → "메모리사업부"
+  const parts = deptname.split('/');
+  return parts[0]?.trim() || '';
 }
 
 main()

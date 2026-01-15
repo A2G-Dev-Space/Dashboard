@@ -176,7 +176,7 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
 
     // 권한 체크: 환경변수 개발자 → DB admin → 일반 사용자
     let isAdmin = false;
-    let adminRole: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null = null;
+    let adminRole: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null = null;
     const isEnvDeveloper = isDeveloper(loginid);
 
     if (isEnvDeveloper) {
@@ -239,7 +239,7 @@ authRoutes.get('/check', authenticateToken, async (req: AuthenticatedRequest, re
 
     // 권한 체크
     let isAdmin = false;
-    let adminRole: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null = null;
+    let adminRole: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null = null;
     const isEnvDeveloper = isDeveloper(loginid);
 
     if (isEnvDeveloper) {

@@ -22,8 +22,9 @@ export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
   userId?: string;        // DB User ID
   isAdmin?: boolean;
-  adminRole?: 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER';
+  adminRole?: 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER';
   isDeveloper?: boolean;  // 환경변수 개발자 여부
+  adminId?: string;       // DB Admin ID
 }
 
 const JWT_SECRET = process.env['JWT_SECRET'] || 'your-jwt-secret-change-in-production';
@@ -92,9 +93,9 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
 }
 
 /**
- * Check if user is an admin
+ * Check if user is an admin (any role)
  * 1. 환경변수 DEVELOPERS에 있으면 → SUPER_ADMIN
- * 2. DB admins 테이블에 있으면 → 해당 역할
+ * 2. DB admins 테이블에 있으면 → 해당 역할 (SUPER_ADMIN, SERVICE_ADMIN, VIEWER, SERVICE_VIEWER)
  */
 export async function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
   if (!req.user) {
@@ -124,7 +125,8 @@ export async function requireAdmin(req: AuthenticatedRequest, res: Response, nex
 
     req.isAdmin = true;
     req.isDeveloper = false;
-    req.adminRole = admin.role;
+    req.adminRole = admin.role as AuthenticatedRequest['adminRole'];
+    req.adminId = admin.id;
     next();
   } catch (error) {
     console.error('Admin check error:', error);
@@ -267,4 +269,94 @@ export function verifyInternalToken(token: string): JWTPayload | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Check if user has write access (not VIEWER or SERVICE_VIEWER)
+ * Must be used after requireAdmin middleware
+ */
+export function requireWriteAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+    res.status(403).json({ error: 'Read-only access. Write operations are not permitted.' });
+    return;
+  }
+  next();
+}
+
+/**
+ * Check if user has access to a specific service
+ * SUPER_ADMIN/VIEWER → all services
+ * SERVICE_ADMIN/SERVICE_VIEWER → only assigned services
+ * Must be used after requireAdmin middleware
+ */
+export function requireServiceAccess(serviceIdParam: string = 'serviceId') {
+  return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      // SUPER_ADMIN and VIEWER have global access
+      if (req.adminRole === 'SUPER_ADMIN' || req.adminRole === 'VIEWER') {
+        next();
+        return;
+      }
+
+      // Get serviceId from query, params, or body
+      const serviceId = (req.query[serviceIdParam] as string)
+        || req.params[serviceIdParam]
+        || req.body?.[serviceIdParam];
+
+      if (!serviceId) {
+        // If no specific service requested, allow (will show all accessible services)
+        next();
+        return;
+      }
+
+      // SERVICE_ADMIN and SERVICE_VIEWER need specific permission
+      if (!req.adminId) {
+        res.status(403).json({ error: 'Admin ID not found' });
+        return;
+      }
+
+      const permission = await prisma.adminService.findUnique({
+        where: {
+          adminId_serviceId: {
+            adminId: req.adminId,
+            serviceId,
+          },
+        },
+      });
+
+      if (!permission) {
+        res.status(403).json({ error: 'No access to this service' });
+        return;
+      }
+
+      next();
+    } catch (error) {
+      console.error('Service access check error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
+/**
+ * Get list of service IDs accessible by the current admin
+ * SUPER_ADMIN/VIEWER → null (all services)
+ * SERVICE_ADMIN/SERVICE_VIEWER → list of assigned service IDs
+ */
+export async function getAccessibleServiceIds(req: AuthenticatedRequest): Promise<string[] | null> {
+  // Global roles can access all services
+  if (req.adminRole === 'SUPER_ADMIN' || req.adminRole === 'VIEWER') {
+    return null; // null means all services
+  }
+
+  // Service-specific roles need to check AdminService
+  if (!req.adminId) {
+    return [];
+  }
+
+  const adminServices = await prisma.adminService.findMany({
+    where: { adminId: req.adminId },
+    select: { serviceId: true },
+  });
+
+  return adminServices.map(as => as.serviceId);
 }

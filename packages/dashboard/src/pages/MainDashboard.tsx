@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X } from 'lucide-react';
 import { statsApi, serviceApi } from '../services/api';
 
-type AdminRole = 'SUPER_ADMIN' | 'ADMIN' | 'VIEWER' | null;
+type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
 interface MainDashboardProps {
   adminRole: AdminRole;
