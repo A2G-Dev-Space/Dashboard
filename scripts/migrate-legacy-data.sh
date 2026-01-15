@@ -220,7 +220,79 @@ DROP TABLE tmp_ratings;
 RATING_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks;")
 echo -e "${GREEN}✓ Ratings migrated: $RATING_COUNT${NC}"
 
-echo -e "\n${YELLOW}Step 11: Create UserService records...${NC}"
+echo -e "\n${YELLOW}Step 11: Decode URL-encoded Korean text...${NC}"
+# Create URL decode function and fix encoded usernames/deptnames
+new_psql -c "
+-- Create URL decode function
+CREATE OR REPLACE FUNCTION url_decode(input TEXT)
+RETURNS TEXT AS \$\$
+DECLARE
+    result TEXT;
+BEGIN
+    IF input IS NULL OR input = '' THEN
+        RETURN input;
+    END IF;
+
+    -- Check if it looks URL encoded (contains %)
+    IF position('%' in input) = 0 THEN
+        RETURN input;
+    END IF;
+
+    BEGIN
+        result := convert_from(
+            decode(
+                regexp_replace(
+                    regexp_replace(input, '%', '', 'g'),
+                    '([0-9A-Fa-f]{2})',
+                    E'\\\\\\\\x\\\\1',
+                    'g'
+                ),
+                'escape'
+            ),
+            'UTF8'
+        );
+        RETURN result;
+    EXCEPTION WHEN OTHERS THEN
+        -- If decode fails, try simpler approach
+        BEGIN
+            SELECT convert_from(
+                decode(
+                    replace(
+                        replace(input, '%', ''),
+                        '+', ' '
+                    ),
+                    'hex'
+                ),
+                'UTF8'
+            ) INTO result;
+            RETURN result;
+        EXCEPTION WHEN OTHERS THEN
+            RETURN input;
+        END;
+    END;
+END;
+\$\$ LANGUAGE plpgsql;
+
+-- Update users with decoded values
+UPDATE users SET
+    username = url_decode(username),
+    deptname = url_decode(deptname),
+    business_unit = CASE
+        WHEN url_decode(deptname) ~ '\\(.*\\)'
+        THEN REGEXP_REPLACE(url_decode(deptname), '.*\\((.*)\\).*', '\\1')
+        ELSE business_unit
+    END
+WHERE username LIKE '%\\%%' ESCAPE '\\\\' OR deptname LIKE '%\\%%' ESCAPE '\\\\';
+
+-- Update daily_usage_stats deptname
+UPDATE daily_usage_stats SET
+    deptname = url_decode(deptname)
+WHERE deptname LIKE '%\\%%' ESCAPE '\\\\';
+"
+DECODED_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users WHERE username NOT LIKE '%\\%%' ESCAPE '\\\\';")
+echo -e "${GREEN}✓ URL decoded. Users with clean names: $DECODED_COUNT${NC}"
+
+echo -e "\n${YELLOW}Step 12: Create UserService records...${NC}"
 new_psql -c "
 INSERT INTO user_services (id, user_id, service_id, first_seen, last_active, request_count)
 SELECT
@@ -240,7 +312,7 @@ ON CONFLICT (user_id, service_id) DO UPDATE SET
 US_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM user_services;")
 echo -e "${GREEN}✓ UserService records created: $US_COUNT${NC}"
 
-echo -e "\n${YELLOW}Step 12: Final verification...${NC}"
+echo -e "\n${YELLOW}Step 13: Final verification...${NC}"
 new_psql -c "
 SELECT 'services' as table_name, COUNT(*) as count FROM services
 UNION ALL SELECT 'users', COUNT(*) FROM users
