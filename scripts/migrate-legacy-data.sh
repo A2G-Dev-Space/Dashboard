@@ -2,6 +2,7 @@
 # ============================================
 # Legacy Data Migration Script
 # nexus-coder-db → dashboard-db
+# Using docker compose exec
 # ============================================
 
 set -e
@@ -16,41 +17,44 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Legacy Data Migration Script${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-# Legacy DB (nexus-coder)
-LEGACY_HOST="localhost"
-LEGACY_PORT="4091"
+# Container names
+LEGACY_CONTAINER="nexus-coder-db"
+NEW_CONTAINER="dashboard-db"
+
+# Legacy DB credentials
 LEGACY_USER="nexuscoder"
-LEGACY_PASS="nexuscoder123"
 LEGACY_DB="nexuscoder"
 
-# New DB (dashboard)
-NEW_HOST="localhost"
-NEW_PORT="4081"
+# New DB credentials
 NEW_USER="ax"
-NEW_PASS="ax123"
 NEW_DB="axdashboard"
 
-# Export for psql
-export PGPASSWORD="$LEGACY_PASS"
+# Helper function to run psql on legacy DB
+legacy_psql() {
+    docker exec -i $LEGACY_CONTAINER psql -U $LEGACY_USER -d $LEGACY_DB "$@"
+}
+
+# Helper function to run psql on new DB
+new_psql() {
+    docker exec -i $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB "$@"
+}
 
 echo -e "\n${YELLOW}Step 1: Check legacy database connection...${NC}"
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "SELECT COUNT(*) as user_count FROM users;" || {
+legacy_psql -c "SELECT COUNT(*) as user_count FROM users;" || {
     echo -e "${RED}Failed to connect to legacy database${NC}"
     exit 1
 }
 echo -e "${GREEN}✓ Legacy database connected${NC}"
 
-export PGPASSWORD="$NEW_PASS"
-
 echo -e "\n${YELLOW}Step 2: Check new database connection...${NC}"
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "SELECT 1;" || {
+new_psql -c "SELECT 1;" || {
     echo -e "${RED}Failed to connect to new database${NC}"
     exit 1
 }
 echo -e "${GREEN}✓ New database connected${NC}"
 
 echo -e "\n${YELLOW}Step 3: Create nexus-coder service in new DB...${NC}"
-SERVICE_ID=$(psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -t -A -c "
+SERVICE_ID=$(new_psql -t -A -c "
 INSERT INTO services (id, name, \"displayName\", description, enabled, created_at, updated_at)
 VALUES (
     gen_random_uuid(),
@@ -67,64 +71,23 @@ RETURNING id;
 SERVICE_ID=$(echo $SERVICE_ID | tr -d '[:space:]')
 echo -e "${GREEN}✓ Service ID: $SERVICE_ID${NC}"
 
-echo -e "\n${YELLOW}Step 4: Export data from legacy DB...${NC}"
-
-# Create temp directory
-TEMP_DIR="/tmp/migration_$(date +%Y%m%d_%H%M%S)"
-mkdir -p $TEMP_DIR
-
-export PGPASSWORD="$LEGACY_PASS"
-
-# Export users
-echo "  Exporting users..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, loginid, username, deptname, \"firstSeen\", \"lastActive\", \"isActive\" FROM users) TO '$TEMP_DIR/users.csv' WITH CSV HEADER"
-
-# Export admins (will need role conversion)
-echo "  Exporting admins..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, loginid, role, \"createdAt\" FROM admins) TO '$TEMP_DIR/admins.csv' WITH CSV HEADER"
-
-# Export models
-echo "  Exporting models..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\" FROM models) TO '$TEMP_DIR/models.csv' WITH CSV HEADER"
-
-# Export usage_logs
-echo "  Exporting usage_logs..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp FROM usage_logs) TO '$TEMP_DIR/usage_logs.csv' WITH CSV HEADER"
-
-# Export daily_usage_stats
-echo "  Exporting daily_usage_stats..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\" FROM daily_usage_stats) TO '$TEMP_DIR/daily_usage_stats.csv' WITH CSV HEADER"
-
-# Export feedbacks
-echo "  Exporting feedbacks..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks) TO '$TEMP_DIR/feedbacks.csv' WITH CSV HEADER"
-
-# Export feedback_comments
-echo "  Exporting feedback_comments..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, feedback_id, admin_id, content, created_at, updated_at FROM feedback_comments) TO '$TEMP_DIR/feedback_comments.csv' WITH CSV HEADER" 2>/dev/null || echo "  (No feedback_comments table or empty)"
-
-# Export rating_feedbacks
-echo "  Exporting rating_feedbacks..."
-psql -h $LEGACY_HOST -p $LEGACY_PORT -U $LEGACY_USER -d $LEGACY_DB -c "\COPY (SELECT id, model_name, rating, timestamp FROM rating_feedbacks) TO '$TEMP_DIR/rating_feedbacks.csv' WITH CSV HEADER"
-
-echo -e "${GREEN}✓ Data exported to $TEMP_DIR${NC}"
-
-echo -e "\n${YELLOW}Step 5: Import data to new DB...${NC}"
-
-export PGPASSWORD="$NEW_PASS"
-
-# Import users (add business_unit column)
-echo "  Importing users..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 4: Migrate users...${NC}"
+# Extract businessUnit from deptname format: "부서이름(사업부이름)" → 사업부이름
+legacy_psql -t -A -c "SELECT id, loginid, username, deptname, \"firstSeen\", \"lastActive\", \"isActive\" FROM users;" | \
+new_psql -c "
 CREATE TEMP TABLE tmp_users (
     id UUID, loginid TEXT, username TEXT, deptname TEXT,
-    \"firstSeen\" TIMESTAMP, \"lastActive\" TIMESTAMP, \"isActive\" BOOLEAN
+    first_seen TIMESTAMP, last_active TIMESTAMP, is_active BOOLEAN
 );
-\COPY tmp_users FROM '$TEMP_DIR/users.csv' WITH CSV HEADER;
+COPY tmp_users FROM STDIN WITH (DELIMITER '|');
 INSERT INTO users (id, loginid, username, deptname, business_unit, \"firstSeen\", \"lastActive\", \"isActive\")
-SELECT id, loginid, username, deptname,
-       CASE WHEN deptname != '' THEN SPLIT_PART(deptname, '/', 1) ELSE NULL END,
-       \"firstSeen\", \"lastActive\", \"isActive\"
+SELECT
+    id, loginid, username, deptname,
+    CASE
+        WHEN deptname ~ '\\(.*\\)' THEN REGEXP_REPLACE(deptname, '.*\\((.*)\\).*', '\\1')
+        ELSE NULL
+    END as business_unit,
+    first_seen, last_active, is_active
 FROM tmp_users
 ON CONFLICT (loginid) DO UPDATE SET
     username = EXCLUDED.username,
@@ -133,128 +96,125 @@ ON CONFLICT (loginid) DO UPDATE SET
     \"lastActive\" = EXCLUDED.\"lastActive\";
 DROP TABLE tmp_users;
 "
+USER_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users;")
+echo -e "${GREEN}✓ Users migrated: $USER_COUNT${NC}"
 
-# Import admins (convert ADMIN → SERVICE_ADMIN)
-echo "  Importing admins (converting roles)..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 5: Migrate admins (ADMIN → SERVICE_ADMIN)...${NC}"
+legacy_psql -t -A -c "SELECT id, loginid, role, \"createdAt\" FROM admins;" | \
+new_psql -c "
 CREATE TEMP TABLE tmp_admins (
-    id UUID, loginid TEXT, role TEXT, \"createdAt\" TIMESTAMP
+    id UUID, loginid TEXT, role TEXT, created_at TIMESTAMP
 );
-\COPY tmp_admins FROM '$TEMP_DIR/admins.csv' WITH CSV HEADER;
+COPY tmp_admins FROM STDIN WITH (DELIMITER '|');
 INSERT INTO admins (id, loginid, role, \"createdAt\")
-SELECT id, loginid,
-       CASE
-           WHEN role = 'ADMIN' THEN 'SERVICE_ADMIN'::\"AdminRole\"
-           WHEN role = 'SUPER_ADMIN' THEN 'SUPER_ADMIN'::\"AdminRole\"
-           WHEN role = 'VIEWER' THEN 'VIEWER'::\"AdminRole\"
-           ELSE 'SERVICE_ADMIN'::\"AdminRole\"
-       END,
-       \"createdAt\"
+SELECT
+    id, loginid,
+    CASE
+        WHEN role = 'ADMIN' THEN 'SERVICE_ADMIN'::\"AdminRole\"
+        WHEN role = 'SUPER_ADMIN' THEN 'SUPER_ADMIN'::\"AdminRole\"
+        WHEN role = 'VIEWER' THEN 'VIEWER'::\"AdminRole\"
+        ELSE 'SERVICE_ADMIN'::\"AdminRole\"
+    END,
+    created_at
 FROM tmp_admins
-ON CONFLICT (loginid) DO UPDATE SET
-    role = EXCLUDED.role;
+ON CONFLICT (loginid) DO UPDATE SET role = EXCLUDED.role;
 DROP TABLE tmp_admins;
 "
+ADMIN_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM admins;")
+echo -e "${GREEN}✓ Admins migrated: $ADMIN_COUNT${NC}"
 
-# Import models (add service_id)
-echo "  Importing models..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 6: Migrate models...${NC}"
+legacy_psql -t -A -c "SELECT id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\" FROM models;" | \
+new_psql -c "
 CREATE TEMP TABLE tmp_models (
-    id UUID, name TEXT, \"displayName\" TEXT, \"endpointUrl\" TEXT,
-    \"apiKey\" TEXT, \"maxTokens\" INT, enabled BOOLEAN,
-    \"createdAt\" TIMESTAMP, \"createdBy\" UUID
+    id UUID, name TEXT, display_name TEXT, endpoint_url TEXT,
+    api_key TEXT, max_tokens INT, enabled BOOLEAN,
+    created_at TIMESTAMP, created_by UUID
 );
-\COPY tmp_models FROM '$TEMP_DIR/models.csv' WITH CSV HEADER;
+COPY tmp_models FROM STDIN WITH (DELIMITER '|', NULL '');
 INSERT INTO models (id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\", service_id)
-SELECT id, name, \"displayName\", \"endpointUrl\", \"apiKey\", \"maxTokens\", enabled, \"createdAt\", \"createdBy\", '$SERVICE_ID'::uuid
+SELECT id, name, display_name, endpoint_url, api_key, max_tokens, enabled, created_at, created_by, '$SERVICE_ID'::uuid
 FROM tmp_models
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    \"displayName\" = EXCLUDED.\"displayName\",
-    service_id = '$SERVICE_ID'::uuid;
+ON CONFLICT (id) DO UPDATE SET service_id = '$SERVICE_ID'::uuid;
 DROP TABLE tmp_models;
 "
+MODEL_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM models;")
+echo -e "${GREEN}✓ Models migrated: $MODEL_COUNT${NC}"
 
-# Import usage_logs (add service_id)
-echo "  Importing usage_logs (this may take a while)..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
-CREATE TEMP TABLE tmp_usage_logs (
+echo -e "\n${YELLOW}Step 7: Migrate usage_logs (this may take a while)...${NC}"
+legacy_psql -t -A -c "SELECT id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp FROM usage_logs;" | \
+new_psql -c "
+CREATE TEMP TABLE tmp_logs (
     id UUID, user_id UUID, model_id UUID,
-    \"inputTokens\" INT, \"outputTokens\" INT, \"totalTokens\" INT,
+    input_tokens INT, output_tokens INT, total_tokens INT,
     timestamp TIMESTAMP
 );
-\COPY tmp_usage_logs FROM '$TEMP_DIR/usage_logs.csv' WITH CSV HEADER;
+COPY tmp_logs FROM STDIN WITH (DELIMITER '|');
 INSERT INTO usage_logs (id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, service_id)
-SELECT id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, '$SERVICE_ID'::uuid
-FROM tmp_usage_logs
+SELECT id, user_id, model_id, input_tokens, output_tokens, total_tokens, timestamp, '$SERVICE_ID'::uuid
+FROM tmp_logs
 ON CONFLICT (id) DO NOTHING;
-DROP TABLE tmp_usage_logs;
+DROP TABLE tmp_logs;
 "
+LOG_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM usage_logs;")
+echo -e "${GREEN}✓ Usage logs migrated: $LOG_COUNT${NC}"
 
-# Import daily_usage_stats (add service_id)
-echo "  Importing daily_usage_stats..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
-CREATE TEMP TABLE tmp_daily_stats (
+echo -e "\n${YELLOW}Step 8: Migrate daily_usage_stats...${NC}"
+legacy_psql -t -A -c "SELECT id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\" FROM daily_usage_stats;" | \
+new_psql -c "
+CREATE TEMP TABLE tmp_stats (
     id UUID, date DATE, user_id UUID, model_id UUID, deptname TEXT,
-    \"totalInputTokens\" INT, \"totalOutputTokens\" INT, \"requestCount\" INT
+    total_input INT, total_output INT, request_count INT
 );
-\COPY tmp_daily_stats FROM '$TEMP_DIR/daily_usage_stats.csv' WITH CSV HEADER;
+COPY tmp_stats FROM STDIN WITH (DELIMITER '|');
 INSERT INTO daily_usage_stats (id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", service_id)
-SELECT id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", '$SERVICE_ID'::uuid
-FROM tmp_daily_stats
+SELECT id, date, user_id, model_id, deptname, total_input, total_output, request_count, '$SERVICE_ID'::uuid
+FROM tmp_stats
 ON CONFLICT (id) DO NOTHING;
-DROP TABLE tmp_daily_stats;
+DROP TABLE tmp_stats;
 "
+STATS_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM daily_usage_stats;")
+echo -e "${GREEN}✓ Daily stats migrated: $STATS_COUNT${NC}"
 
-# Import feedbacks (add service_id)
-echo "  Importing feedbacks..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 9: Migrate feedbacks...${NC}"
+legacy_psql -t -A -c "SELECT id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks;" 2>/dev/null | \
+new_psql -c "
 CREATE TEMP TABLE tmp_feedbacks (
     id UUID, user_id UUID, category TEXT, title TEXT, content TEXT,
-    images TEXT[], status TEXT, response TEXT, responded_by UUID,
+    images TEXT, status TEXT, response TEXT, responded_by UUID,
     responded_at TIMESTAMP, created_at TIMESTAMP, updated_at TIMESTAMP
 );
-\COPY tmp_feedbacks FROM '$TEMP_DIR/feedbacks.csv' WITH CSV HEADER;
+COPY tmp_feedbacks FROM STDIN WITH (DELIMITER '|', NULL '');
 INSERT INTO feedbacks (id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at, service_id)
-SELECT id, user_id, category::\"FeedbackCategory\", title, content, images, status::\"FeedbackStatus\", response, responded_by, responded_at, created_at, updated_at, '$SERVICE_ID'::uuid
+SELECT
+    id, user_id, category::\"FeedbackCategory\", title, content,
+    CASE WHEN images IS NOT NULL AND images != '' THEN string_to_array(images, ',') ELSE ARRAY[]::TEXT[] END,
+    status::\"FeedbackStatus\", response, responded_by, responded_at, created_at, updated_at, '$SERVICE_ID'::uuid
 FROM tmp_feedbacks
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_feedbacks;
-"
+" 2>/dev/null || echo "  (No feedbacks or skipped)"
+FEEDBACK_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM feedbacks;")
+echo -e "${GREEN}✓ Feedbacks migrated: $FEEDBACK_COUNT${NC}"
 
-# Import feedback_comments
-echo "  Importing feedback_comments..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
-CREATE TEMP TABLE tmp_comments (
-    id UUID, feedback_id UUID, admin_id UUID, content TEXT,
-    created_at TIMESTAMP, updated_at TIMESTAMP
-);
-\COPY tmp_comments FROM '$TEMP_DIR/feedback_comments.csv' WITH CSV HEADER;
-INSERT INTO feedback_comments (id, feedback_id, admin_id, content, created_at, updated_at)
-SELECT id, feedback_id, admin_id, content, created_at, updated_at
-FROM tmp_comments
-ON CONFLICT (id) DO NOTHING;
-DROP TABLE tmp_comments;
-" 2>/dev/null || echo "  (Skipped - no data)"
-
-# Import rating_feedbacks (add service_id)
-echo "  Importing rating_feedbacks..."
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 10: Migrate rating_feedbacks...${NC}"
+legacy_psql -t -A -c "SELECT id, model_name, rating, timestamp FROM rating_feedbacks;" 2>/dev/null | \
+new_psql -c "
 CREATE TEMP TABLE tmp_ratings (
     id UUID, model_name TEXT, rating INT, timestamp TIMESTAMP
 );
-\COPY tmp_ratings FROM '$TEMP_DIR/rating_feedbacks.csv' WITH CSV HEADER;
+COPY tmp_ratings FROM STDIN WITH (DELIMITER '|');
 INSERT INTO rating_feedbacks (id, model_name, rating, timestamp, service_id)
 SELECT id, model_name, rating, timestamp, '$SERVICE_ID'::uuid
 FROM tmp_ratings
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_ratings;
-"
+" 2>/dev/null || echo "  (No ratings or skipped)"
+RATING_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks;")
+echo -e "${GREEN}✓ Ratings migrated: $RATING_COUNT${NC}"
 
-echo -e "${GREEN}✓ Data imported${NC}"
-
-echo -e "\n${YELLOW}Step 6: Create UserService records from usage_logs...${NC}"
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 11: Create UserService records...${NC}"
+new_psql -c "
 INSERT INTO user_services (id, user_id, service_id, first_seen, last_active, request_count)
 SELECT
     gen_random_uuid(),
@@ -270,11 +230,11 @@ ON CONFLICT (user_id, service_id) DO UPDATE SET
     last_active = EXCLUDED.last_active,
     request_count = EXCLUDED.request_count;
 "
-echo -e "${GREEN}✓ UserService records created${NC}"
+US_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM user_services;")
+echo -e "${GREEN}✓ UserService records created: $US_COUNT${NC}"
 
-echo -e "\n${YELLOW}Step 7: Verify migration...${NC}"
-echo "  Counting records in new database:"
-psql -h $NEW_HOST -p $NEW_PORT -U $NEW_USER -d $NEW_DB -c "
+echo -e "\n${YELLOW}Step 12: Final verification...${NC}"
+new_psql -c "
 SELECT 'services' as table_name, COUNT(*) as count FROM services
 UNION ALL SELECT 'users', COUNT(*) FROM users
 UNION ALL SELECT 'admins', COUNT(*) FROM admins
@@ -283,16 +243,13 @@ UNION ALL SELECT 'usage_logs', COUNT(*) FROM usage_logs
 UNION ALL SELECT 'daily_usage_stats', COUNT(*) FROM daily_usage_stats
 UNION ALL SELECT 'feedbacks', COUNT(*) FROM feedbacks
 UNION ALL SELECT 'rating_feedbacks', COUNT(*) FROM rating_feedbacks
-UNION ALL SELECT 'user_services', COUNT(*) FROM user_services;
+UNION ALL SELECT 'user_services', COUNT(*) FROM user_services
+ORDER BY table_name;
 "
-
-# Cleanup
-echo -e "\n${YELLOW}Step 8: Cleanup temp files...${NC}"
-rm -rf $TEMP_DIR
-echo -e "${GREEN}✓ Temp files removed${NC}"
 
 echo -e "\n${GREEN}========================================${NC}"
 echo -e "${GREEN}  Migration Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo -e "Service ID: ${YELLOW}$SERVICE_ID${NC}"
-echo -e "All legacy data has been migrated with this service ID."
+echo -e "\nBusinessUnit 추출 규칙: 부서이름(사업부이름) → 사업부이름"
+echo -e "예: 'AI플랫폼팀(DS)' → businessUnit = 'DS'"
