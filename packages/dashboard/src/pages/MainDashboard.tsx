@@ -73,6 +73,11 @@ interface DeptStats {
   tokensByModel: { modelName: string; tokens: number }[];
 }
 
+interface DeptDailyData {
+  date: string;
+  [businessUnit: string]: string | number;
+}
+
 interface GlobalTotals {
   totalServices: number;
   totalUsers: number;
@@ -87,6 +92,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [globalTotals, setGlobalTotals] = useState<GlobalTotals | null>(null);
   const [serviceDaily, setServiceDaily] = useState<ServiceDailyData[]>([]);
   const [deptStats, setDeptStats] = useState<DeptStats[]>([]);
+  const [deptDailyData, setDeptDailyData] = useState<DeptDailyData[]>([]);
+  const [deptBusinessUnits, setDeptBusinessUnits] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -102,11 +109,12 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
   const loadData = async () => {
     try {
-      const [servicesRes, globalRes, serviceDailyRes, deptRes] = await Promise.all([
+      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes] = await Promise.all([
         serviceApi.list(),
         statsApi.globalOverview(),
         statsApi.globalByService(30),
         statsApi.globalByDept(30),
+        statsApi.globalByDeptDaily(30, 5),
       ]);
 
       setServices(servicesRes.data.services || []);
@@ -114,6 +122,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       setGlobalTotals(globalRes.data.totals || null);
       setServiceDaily(serviceDailyRes.data.dailyData || []);
       setDeptStats(deptRes.data.deptStats || []);
+      setDeptDailyData(deptDailyRes.data.chartData || []);
+      setDeptBusinessUnits(deptDailyRes.data.businessUnits || []);
     } catch (error) {
       console.error('Failed to load main dashboard data:', error);
     } finally {
@@ -201,21 +211,20 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     })),
   };
 
-  // Prepare dept chart data
-  const deptChartData = {
-    labels: deptStats.slice(0, 10).map(d => d.deptname.length > 15 ? d.deptname.slice(0, 15) + '...' : d.deptname),
-    datasets: [
-      {
-        label: '누적 사용자',
-        data: deptStats.slice(0, 10).map(d => d.cumulativeUsers),
-        backgroundColor: 'rgba(59, 130, 246, 0.7)',
-      },
-      {
-        label: '일평균 활성 사용자',
-        data: deptStats.slice(0, 10).map(d => Math.round(d.avgDailyActiveUsers)),
-        backgroundColor: 'rgba(16, 185, 129, 0.7)',
-      },
-    ],
+  // Prepare dept daily line chart data
+  const deptLineChartData = {
+    labels: deptDailyData.map(d => (d.date as string).slice(5)), // MM-DD format
+    datasets: deptBusinessUnits.map((bu, index) => ({
+      label: bu,
+      data: deptDailyData.map(d => (d[bu] as number) || 0),
+      borderColor: colors[index % colors.length].border,
+      backgroundColor: colors[index % colors.length].bg,
+      borderWidth: 2,
+      fill: false,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    })),
   };
 
   if (loading) {
@@ -465,31 +474,49 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       <div className="bg-white rounded-2xl shadow-card p-6">
         <div className="flex items-center gap-2 mb-4">
           <Building2 className="w-5 h-5 text-samsung-blue" />
-          <h2 className="text-lg font-semibold text-gray-900">사업부별 통계</h2>
+          <h2 className="text-lg font-semibold text-gray-900">사업부별 토큰 사용량 추이</h2>
+          <span className="text-xs text-gray-500">(최근 30일, Top 5 사업부)</span>
         </div>
 
-        {deptStats.length > 0 ? (
+        {deptDailyData.length > 0 ? (
           <>
-            {/* Department Chart */}
-            <div className="h-64 mb-6">
-              <Bar
-                data={deptChartData}
+            {/* Department Line Chart */}
+            <div className="h-72 mb-6">
+              <Line
+                data={deptLineChartData}
                 options={{
                   responsive: true,
                   maintainAspectRatio: false,
+                  interaction: {
+                    mode: 'index',
+                    intersect: false,
+                  },
                   plugins: {
                     legend: {
                       position: 'top',
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: (context) => {
+                          const value = context.parsed.y;
+                          if (value >= 1000000) return `${context.dataset.label}: ${(value / 1000000).toFixed(1)}M`;
+                          if (value >= 1000) return `${context.dataset.label}: ${(value / 1000).toFixed(1)}K`;
+                          return `${context.dataset.label}: ${value}`;
+                        },
+                      },
                     },
                   },
                   scales: {
                     y: {
                       beginAtZero: true,
-                    },
-                    x: {
                       ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
+                        callback: (value) => {
+                          if (typeof value === 'number') {
+                            if (value >= 1000000) return (value / 1000000).toFixed(0) + 'M';
+                            if (value >= 1000) return (value / 1000).toFixed(0) + 'K';
+                          }
+                          return value;
+                        },
                       },
                     },
                   },
@@ -542,6 +569,30 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
               )}
             </div>
           </>
+        ) : deptStats.length > 0 ? (
+          /* Show table only if we have deptStats but no deptDailyData */
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-3 px-2 font-semibold text-gray-700">사업부</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">누적 사용자</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">일평균 활성</th>
+                  <th className="text-right py-3 px-2 font-semibold text-gray-700">총 토큰</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deptStats.slice(0, 15).map((dept, index) => (
+                  <tr key={dept.deptname} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                    <td className="py-3 px-2 font-medium text-gray-900">{dept.deptname}</td>
+                    <td className="text-right py-3 px-2 text-gray-700">{formatNumber(dept.cumulativeUsers)}</td>
+                    <td className="text-right py-3 px-2 text-gray-700">{dept.avgDailyActiveUsers.toFixed(1)}</td>
+                    <td className="text-right py-3 px-2 text-gray-700">{formatNumber(dept.totalTokens)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="text-center py-8 text-gray-500">
             사업부별 통계 데이터가 없습니다.

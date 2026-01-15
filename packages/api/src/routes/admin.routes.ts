@@ -1528,6 +1528,124 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
   }
 });
 
+/**
+ * GET /admin/stats/global/by-dept-daily
+ * 사업부별 일별 토큰 사용량 (시계열 - Line Chart용)
+ * Query: ?days= (30), ?serviceId= (optional), ?topN= (5)
+ */
+adminRoutes.get('/stats/global/by-dept-daily', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
+    const topN = Math.min(10, Math.max(3, parseInt(req.query['topN'] as string) || 5));
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // 1. Get top N business units by total tokens
+    let topBUs: Array<{ business_unit: string; total_tokens: bigint }>;
+
+    if (serviceId) {
+      topBUs = await prisma.$queryRaw`
+        SELECT u.business_unit, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
+          AND ul.timestamp >= ${startDate}
+          AND ul.service_id::text = ${serviceId}
+        GROUP BY u.business_unit
+        ORDER BY total_tokens DESC
+        LIMIT ${topN}
+      `;
+    } else {
+      topBUs = await prisma.$queryRaw`
+        SELECT u.business_unit, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.business_unit IS NOT NULL
+          AND u.business_unit != ''
+          AND ul.timestamp >= ${startDate}
+        GROUP BY u.business_unit
+        ORDER BY total_tokens DESC
+        LIMIT ${topN}
+      `;
+    }
+
+    const topBUNames = topBUs.map(b => b.business_unit);
+
+    // 2. Get daily stats for top business units
+    let dailyStats: Array<{ date: Date; business_unit: string; total_tokens: bigint }>;
+
+    if (serviceId) {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(ul.timestamp) as date, u.business_unit, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.business_unit = ANY(${topBUNames})
+          AND ul.timestamp >= ${startDate}
+          AND ul.service_id::text = ${serviceId}
+        GROUP BY DATE(ul.timestamp), u.business_unit
+        ORDER BY date ASC
+      `;
+    } else {
+      dailyStats = await prisma.$queryRaw`
+        SELECT DATE(ul.timestamp) as date, u.business_unit, SUM(ul."totalTokens") as total_tokens
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND u.business_unit = ANY(${topBUNames})
+          AND ul.timestamp >= ${startDate}
+        GROUP BY DATE(ul.timestamp), u.business_unit
+        ORDER BY date ASC
+      `;
+    }
+
+    // 3. Build response
+    const dateMap = new Map<string, Record<string, number>>();
+
+    // Initialize all dates with 0 for all BUs
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, number> = {};
+      for (const bu of topBUNames) {
+        initialData[bu] = 0;
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    // Fill in actual data
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const existing = dateMap.get(dateStr);
+      if (existing) {
+        existing[stat.business_unit] = Number(stat.total_tokens);
+      }
+    }
+
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, buData]) => ({
+        date,
+        ...buData,
+      }));
+
+    res.json({
+      businessUnits: topBUNames,
+      chartData,
+      periodDays: days,
+      serviceId: serviceId || null,
+    });
+  } catch (error) {
+    console.error('Get dept daily stats error:', error);
+    res.status(500).json({ error: 'Failed to get department daily statistics' });
+  }
+});
+
 // ==================== User Promotion ====================
 
 /**

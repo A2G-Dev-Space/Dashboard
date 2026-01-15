@@ -117,6 +117,7 @@ export const statsApi = {
   globalOverview: () => api.get('/admin/stats/global/overview'),
   globalByService: (days = 30) => api.get('/admin/stats/global/by-service', { params: { days } }),
   globalByDept: (days = 30) => api.get('/admin/stats/global/by-dept', { params: { days } }),
+  globalByDeptDaily: (days = 30, topN = 5) => api.get('/admin/stats/global/by-dept-daily', { params: { days, topN } }),
 };
 
 // 개인 사용량 API
