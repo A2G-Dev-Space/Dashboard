@@ -67,8 +67,7 @@ VALUES (
 )
 ON CONFLICT (name) DO UPDATE SET updated_at = NOW()
 RETURNING id;
-")
-SERVICE_ID=$(echo $SERVICE_ID | tr -d '[:space:]')
+" | grep -E '^[0-9a-f-]{36}$' | head -1)
 echo -e "${GREEN}✓ Service ID: $SERVICE_ID${NC}"
 
 echo -e "\n${YELLOW}Step 4: Migrate users...${NC}"
