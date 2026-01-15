@@ -141,7 +141,8 @@ MODEL_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM models;")
 echo -e "${GREEN}✓ Models migrated: $MODEL_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 7: Migrate usage_logs (this may take a while)...${NC}"
-legacy_psql -t -A -c "SELECT id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp FROM usage_logs;" | \
+# Only migrate logs for users that exist in users table
+legacy_psql -t -A -c "SELECT ul.id, ul.user_id, ul.model_id, ul.\"inputTokens\", ul.\"outputTokens\", ul.\"totalTokens\", ul.timestamp FROM usage_logs ul INNER JOIN users u ON ul.user_id = u.id;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_logs (
     id UUID, user_id UUID, model_id UUID,
@@ -150,8 +151,10 @@ CREATE TEMP TABLE tmp_logs (
 );
 COPY tmp_logs FROM STDIN WITH (DELIMITER '|');
 INSERT INTO usage_logs (id, user_id, model_id, \"inputTokens\", \"outputTokens\", \"totalTokens\", timestamp, service_id)
-SELECT id, user_id, model_id, input_tokens, output_tokens, total_tokens, timestamp, '$SERVICE_ID'::uuid
-FROM tmp_logs
+SELECT t.id, t.user_id, t.model_id, t.input_tokens, t.output_tokens, t.total_tokens, t.timestamp, '$SERVICE_ID'::uuid
+FROM tmp_logs t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_logs;
 "
@@ -159,7 +162,8 @@ LOG_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM usage_logs;")
 echo -e "${GREEN}✓ Usage logs migrated: $LOG_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 8: Migrate daily_usage_stats...${NC}"
-legacy_psql -t -A -c "SELECT id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\" FROM daily_usage_stats;" | \
+# Only migrate stats for users and models that exist
+legacy_psql -t -A -c "SELECT ds.id, ds.date, ds.user_id, ds.model_id, ds.deptname, ds.\"totalInputTokens\", ds.\"totalOutputTokens\", ds.\"requestCount\" FROM daily_usage_stats ds INNER JOIN users u ON ds.user_id = u.id INNER JOIN models m ON ds.model_id = m.id;" | \
 new_psql -c "
 CREATE TEMP TABLE tmp_stats (
     id UUID, date DATE, user_id UUID, model_id UUID, deptname TEXT,
@@ -167,8 +171,10 @@ CREATE TEMP TABLE tmp_stats (
 );
 COPY tmp_stats FROM STDIN WITH (DELIMITER '|');
 INSERT INTO daily_usage_stats (id, date, user_id, model_id, deptname, \"totalInputTokens\", \"totalOutputTokens\", \"requestCount\", service_id)
-SELECT id, date, user_id, model_id, deptname, total_input, total_output, request_count, '$SERVICE_ID'::uuid
-FROM tmp_stats
+SELECT t.id, t.date, t.user_id, t.model_id, t.deptname, t.total_input, t.total_output, t.request_count, '$SERVICE_ID'::uuid
+FROM tmp_stats t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
+  AND EXISTS (SELECT 1 FROM models m WHERE m.id = t.model_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_stats;
 "
@@ -176,7 +182,8 @@ STATS_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM daily_usage_stats;")
 echo -e "${GREEN}✓ Daily stats migrated: $STATS_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 9: Migrate feedbacks...${NC}"
-legacy_psql -t -A -c "SELECT id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at FROM feedbacks;" 2>/dev/null | \
+# Only migrate feedbacks for users that exist
+legacy_psql -t -A -c "SELECT f.id, f.user_id, f.category, f.title, f.content, f.images, f.status, f.response, f.responded_by, f.responded_at, f.created_at, f.updated_at FROM feedbacks f INNER JOIN users u ON f.user_id = u.id;" 2>/dev/null | \
 new_psql -c "
 CREATE TEMP TABLE tmp_feedbacks (
     id UUID, user_id UUID, category TEXT, title TEXT, content TEXT,
@@ -186,10 +193,11 @@ CREATE TEMP TABLE tmp_feedbacks (
 COPY tmp_feedbacks FROM STDIN WITH (DELIMITER '|', NULL '');
 INSERT INTO feedbacks (id, user_id, category, title, content, images, status, response, responded_by, responded_at, created_at, updated_at, service_id)
 SELECT
-    id, user_id, category::\"FeedbackCategory\", title, content,
-    CASE WHEN images IS NOT NULL AND images != '' THEN string_to_array(images, ',') ELSE ARRAY[]::TEXT[] END,
-    status::\"FeedbackStatus\", response, responded_by, responded_at, created_at, updated_at, '$SERVICE_ID'::uuid
-FROM tmp_feedbacks
+    t.id, t.user_id, t.category::\"FeedbackCategory\", t.title, t.content,
+    CASE WHEN t.images IS NOT NULL AND t.images != '' THEN string_to_array(t.images, ',') ELSE ARRAY[]::TEXT[] END,
+    t.status::\"FeedbackStatus\", t.response, t.responded_by, t.responded_at, t.created_at, t.updated_at, '$SERVICE_ID'::uuid
+FROM tmp_feedbacks t
+WHERE EXISTS (SELECT 1 FROM users u WHERE u.id = t.user_id)
 ON CONFLICT (id) DO NOTHING;
 DROP TABLE tmp_feedbacks;
 " 2>/dev/null || echo "  (No feedbacks or skipped)"
