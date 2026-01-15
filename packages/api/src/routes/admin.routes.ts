@@ -1258,15 +1258,17 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
             },
           }),
 
-          // Average daily active users (last 30 days)
+          // Average daily active users (last 30 days, excluding anonymous)
           prisma.$queryRaw<Array<{ avg_users: number }>>`
-            SELECT AVG(user_count)::float as avg_users
+            SELECT COALESCE(AVG(user_count), 0)::float as avg_users
             FROM (
-              SELECT DATE(timestamp), COUNT(DISTINCT user_id) as user_count
-              FROM usage_logs
-              WHERE service_id::text = ${service.id}
-                AND timestamp >= NOW() - INTERVAL '30 days'
-              GROUP BY DATE(timestamp)
+              SELECT DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as user_count
+              FROM usage_logs ul
+              INNER JOIN users u ON ul.user_id = u.id
+              WHERE ul.service_id::text = ${service.id}
+                AND ul.timestamp >= NOW() - INTERVAL '30 days'
+                AND u.loginid != 'anonymous'
+              GROUP BY DATE(ul.timestamp)
             ) daily_counts
           `.then((r) => Math.round(r[0]?.avg_users || 0)),
 
@@ -1668,6 +1670,208 @@ adminRoutes.get('/stats/global/by-dept-daily', async (req: AuthenticatedRequest,
   } catch (error) {
     console.error('Get dept daily stats error:', error);
     res.status(500).json({ error: 'Failed to get department daily statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/global/by-dept-users-daily
+ * 사업부별 일별 사용자 수 (누적/활성 - Line Chart용)
+ * Query: ?days= (30), ?topN= (5)
+ */
+adminRoutes.get('/stats/global/by-dept-users-daily', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const topN = Math.min(10, Math.max(3, parseInt(req.query['topN'] as string) || 5));
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // 1. Get top N business units by total users
+    const topBUs = await prisma.$queryRaw<Array<{ business_unit: string; user_count: bigint }>>`
+      SELECT u.business_unit, COUNT(DISTINCT ul.user_id) as user_count
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      WHERE u.loginid != 'anonymous'
+        AND u.business_unit IS NOT NULL
+        AND u.business_unit != ''
+        AND ul.timestamp >= ${startDate}
+      GROUP BY u.business_unit
+      ORDER BY user_count DESC
+      LIMIT ${topN}
+    `;
+
+    const topBUNames = topBUs.map(b => b.business_unit);
+
+    // 2. Get daily active users for top business units
+    const dailyStats = await prisma.$queryRaw<Array<{ date: Date; business_unit: string; active_users: bigint }>>`
+      SELECT DATE(ul.timestamp) as date, u.business_unit, COUNT(DISTINCT ul.user_id) as active_users
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      WHERE u.loginid != 'anonymous'
+        AND u.business_unit = ANY(${topBUNames})
+        AND ul.timestamp >= ${startDate}
+      GROUP BY DATE(ul.timestamp), u.business_unit
+      ORDER BY date ASC
+    `;
+
+    // 3. Build response with cumulative users
+    const dateMap = new Map<string, Record<string, { active: number; cumulative: number }>>();
+    const cumulativeUsers = new Map<string, Set<string>>(); // Track unique users per BU
+
+    // Initialize
+    for (const bu of topBUNames) {
+      cumulativeUsers.set(bu, new Set());
+    }
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, { active: number; cumulative: number }> = {};
+      for (const bu of topBUNames) {
+        initialData[bu] = { active: 0, cumulative: cumulativeUsers.get(bu)?.size || 0 };
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    // Get all user_ids per day per BU for cumulative calculation
+    const usersByDayBU = await prisma.$queryRaw<Array<{ date: Date; business_unit: string; user_id: string }>>`
+      SELECT DISTINCT DATE(ul.timestamp) as date, u.business_unit, ul.user_id::text
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      WHERE u.loginid != 'anonymous'
+        AND u.business_unit = ANY(${topBUNames})
+        AND ul.timestamp >= ${startDate}
+      ORDER BY date ASC
+    `;
+
+    // Build cumulative counts
+    for (const row of usersByDayBU) {
+      const dateStr = formatDateToString(row.date);
+      const buSet = cumulativeUsers.get(row.business_unit);
+      if (buSet) {
+        buSet.add(row.user_id);
+        const existing = dateMap.get(dateStr);
+        if (existing && existing[row.business_unit]) {
+          existing[row.business_unit].cumulative = buSet.size;
+        }
+      }
+    }
+
+    // Fill in active users
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const existing = dateMap.get(dateStr);
+      if (existing && existing[stat.business_unit]) {
+        existing[stat.business_unit].active = Number(stat.active_users);
+      }
+    }
+
+    // Flatten for chart
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, buData]) => {
+        const item: Record<string, string | number> = { date };
+        for (const bu of topBUNames) {
+          item[`${bu}_active`] = buData[bu]?.active || 0;
+          item[`${bu}_cumulative`] = buData[bu]?.cumulative || 0;
+        }
+        return item;
+      });
+
+    res.json({
+      businessUnits: topBUNames,
+      chartData,
+      periodDays: days,
+    });
+  } catch (error) {
+    console.error('Get dept users daily stats error:', error);
+    res.status(500).json({ error: 'Failed to get department users daily statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/global/by-dept-service-requests-daily
+ * 사업부+서비스별 일별 API 요청수 (Line Chart용)
+ * Query: ?days= (30), ?topN= (5)
+ */
+adminRoutes.get('/stats/global/by-dept-service-requests-daily', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = parseInt(req.query['days'] as string) || 30;
+    const topN = Math.min(10, Math.max(3, parseInt(req.query['topN'] as string) || 5));
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // 1. Get top N dept+service combinations by request count
+    const topCombos = await prisma.$queryRaw<Array<{ business_unit: string; service_name: string; request_count: bigint }>>`
+      SELECT u.business_unit, s.name as service_name, COUNT(*) as request_count
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      INNER JOIN services s ON ul.service_id = s.id
+      WHERE u.loginid != 'anonymous'
+        AND u.business_unit IS NOT NULL
+        AND u.business_unit != ''
+        AND ul.timestamp >= ${startDate}
+      GROUP BY u.business_unit, s.name
+      ORDER BY request_count DESC
+      LIMIT ${topN}
+    `;
+
+    const comboNames = topCombos.map(c => `${c.business_unit}/${c.service_name}`);
+    const topBUs = [...new Set(topCombos.map(c => c.business_unit))];
+    const topServices = [...new Set(topCombos.map(c => c.service_name))];
+
+    // 2. Get daily requests for top business units and services
+    const dailyStats = await prisma.$queryRaw<Array<{ date: Date; business_unit: string; service_name: string; requests: bigint }>>`
+      SELECT DATE(ul.timestamp) as date, u.business_unit, s.name as service_name, COUNT(*) as requests
+      FROM usage_logs ul
+      INNER JOIN users u ON ul.user_id = u.id
+      INNER JOIN services s ON ul.service_id = s.id
+      WHERE u.loginid != 'anonymous'
+        AND ul.timestamp >= ${startDate}
+        AND u.business_unit = ANY(${topBUs})
+        AND s.name = ANY(${topServices})
+      GROUP BY DATE(ul.timestamp), u.business_unit, s.name
+      ORDER BY date ASC
+    `;
+
+    // 3. Build response
+    const dateMap = new Map<string, Record<string, number>>();
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const initialData: Record<string, number> = {};
+      for (const combo of comboNames) {
+        initialData[combo] = 0;
+      }
+      dateMap.set(dateStr, initialData);
+    }
+
+    for (const stat of dailyStats) {
+      const dateStr = formatDateToString(stat.date);
+      const comboKey = `${stat.business_unit}/${stat.service_name}`;
+      const existing = dateMap.get(dateStr);
+      if (existing && comboNames.includes(comboKey)) {
+        existing[comboKey] = Number(stat.requests);
+      }
+    }
+
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, comboData]) => ({
+        date,
+        ...comboData,
+      }));
+
+    res.json({
+      combinations: comboNames,
+      chartData,
+      periodDays: days,
+    });
+  } catch (error) {
+    console.error('Get dept-service requests daily stats error:', error);
+    res.status(500).json({ error: 'Failed to get department-service requests daily statistics' });
   }
 });
 

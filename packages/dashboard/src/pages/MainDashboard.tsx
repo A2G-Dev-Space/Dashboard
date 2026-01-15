@@ -78,6 +78,16 @@ interface DeptDailyData {
   [businessUnit: string]: string | number;
 }
 
+interface DeptUsersDaily {
+  date: string;
+  [key: string]: string | number; // BU_active, BU_cumulative
+}
+
+interface DeptServiceRequestsDaily {
+  date: string;
+  [key: string]: string | number; // "BU/Service" combinations
+}
+
 interface GlobalTotals {
   totalServices: number;
   totalUsers: number;
@@ -94,6 +104,10 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [deptStats, setDeptStats] = useState<DeptStats[]>([]);
   const [deptDailyData, setDeptDailyData] = useState<DeptDailyData[]>([]);
   const [deptBusinessUnits, setDeptBusinessUnits] = useState<string[]>([]);
+  const [deptUsersDailyData, setDeptUsersDailyData] = useState<DeptUsersDaily[]>([]);
+  const [deptUsersBUs, setDeptUsersBUs] = useState<string[]>([]);
+  const [deptServiceRequestsData, setDeptServiceRequestsData] = useState<DeptServiceRequestsDaily[]>([]);
+  const [deptServiceCombos, setDeptServiceCombos] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -109,12 +123,14 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
   const loadData = async () => {
     try {
-      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes] = await Promise.all([
+      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes, deptUsersDailyRes, deptServiceReqsRes] = await Promise.all([
         serviceApi.list(),
         statsApi.globalOverview(),
         statsApi.globalByService(30),
         statsApi.globalByDept(30),
         statsApi.globalByDeptDaily(30, 5),
+        statsApi.globalByDeptUsersDaily(30, 5),
+        statsApi.globalByDeptServiceRequestsDaily(30, 10),
       ]);
 
       setServices(servicesRes.data.services || []);
@@ -124,6 +140,10 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       setDeptStats(deptRes.data.deptStats || []);
       setDeptDailyData(deptDailyRes.data.chartData || []);
       setDeptBusinessUnits(deptDailyRes.data.businessUnits || []);
+      setDeptUsersDailyData(deptUsersDailyRes.data.chartData || []);
+      setDeptUsersBUs(deptUsersDailyRes.data.businessUnits || []);
+      setDeptServiceRequestsData(deptServiceReqsRes.data.chartData || []);
+      setDeptServiceCombos(deptServiceReqsRes.data.combinations || []);
     } catch (error) {
       console.error('Failed to load main dashboard data:', error);
     } finally {
@@ -211,7 +231,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     })),
   };
 
-  // Prepare dept daily line chart data
+  // Prepare dept daily token usage line chart data
   const deptLineChartData = {
     labels: deptDailyData.map(d => (d.date as string).slice(5)), // MM-DD format
     datasets: deptBusinessUnits.map((bu, index) => ({
@@ -219,6 +239,66 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       data: deptDailyData.map(d => (d[bu] as number) || 0),
       borderColor: colors[index % colors.length].border,
       backgroundColor: colors[index % colors.length].bg,
+      borderWidth: 2,
+      fill: false,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    })),
+  };
+
+  // Prepare dept users daily chart data (cumulative + active)
+  const deptUsersChartData = {
+    labels: deptUsersDailyData.map(d => (d.date as string).slice(5)),
+    datasets: deptUsersBUs.flatMap((bu, index) => [
+      {
+        label: `${bu} (누적)`,
+        data: deptUsersDailyData.map(d => (d[`${bu}_cumulative`] as number) || 0),
+        borderColor: colors[index % colors.length].border,
+        backgroundColor: colors[index % colors.length].bg,
+        borderWidth: 2,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      },
+      {
+        label: `${bu} (활성)`,
+        data: deptUsersDailyData.map(d => (d[`${bu}_active`] as number) || 0),
+        borderColor: colors[index % colors.length].border,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderDash: [5, 5], // dashed line for active users
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      },
+    ]),
+  };
+
+  // Extended colors for dept+service combinations (10 items)
+  const extendedColors = [
+    { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgb(59, 130, 246)' },
+    { bg: 'rgba(16, 185, 129, 0.5)', border: 'rgb(16, 185, 129)' },
+    { bg: 'rgba(245, 158, 11, 0.5)', border: 'rgb(245, 158, 11)' },
+    { bg: 'rgba(139, 92, 246, 0.5)', border: 'rgb(139, 92, 246)' },
+    { bg: 'rgba(236, 72, 153, 0.5)', border: 'rgb(236, 72, 153)' },
+    { bg: 'rgba(6, 182, 212, 0.5)', border: 'rgb(6, 182, 212)' },
+    { bg: 'rgba(234, 88, 12, 0.5)', border: 'rgb(234, 88, 12)' },
+    { bg: 'rgba(99, 102, 241, 0.5)', border: 'rgb(99, 102, 241)' },
+    { bg: 'rgba(20, 184, 166, 0.5)', border: 'rgb(20, 184, 166)' },
+    { bg: 'rgba(244, 63, 94, 0.5)', border: 'rgb(244, 63, 94)' },
+  ];
+
+  // Prepare dept+service API requests chart data
+  const deptServiceRequestsChartData = {
+    labels: deptServiceRequestsData.map(d => (d.date as string).slice(5)),
+    datasets: deptServiceCombos.map((combo, index) => ({
+      label: combo,
+      data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
+      borderColor: extendedColors[index % extendedColors.length].border,
+      backgroundColor: extendedColors[index % extendedColors.length].bg,
       borderWidth: 2,
       fill: false,
       tension: 0.3,
@@ -470,7 +550,113 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         </div>
       )}
 
-      {/* Department Stats */}
+      {/* 1. Department Users Chart (Cumulative + Active) */}
+      {deptUsersDailyData.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="w-5 h-5 text-samsung-blue" />
+            <h2 className="text-lg font-semibold text-gray-900">사업부별 사용자 추이</h2>
+            <span className="text-xs text-gray-500">(최근 30일, Top 5 사업부 - 실선: 누적, 점선: 활성)</span>
+          </div>
+          <div className="h-72">
+            <Line
+              data={deptUsersChartData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    position: 'top',
+                    labels: {
+                      usePointStyle: true,
+                      padding: 10,
+                    },
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: (context) => {
+                        const value = context.parsed.y ?? 0;
+                        return `${context.dataset.label}: ${value.toLocaleString()}명`;
+                      },
+                    },
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    ticks: {
+                      callback: (value: string | number) => formatNumber(Number(value)),
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 2. Department + Service API Requests Chart */}
+      {deptServiceRequestsData.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-5 h-5 text-amber-500" />
+            <h2 className="text-lg font-semibold text-gray-900">사업부+서비스별 API 요청 추이</h2>
+            <span className="text-xs text-gray-500">(최근 30일, Top 10 조합)</span>
+          </div>
+          <div className="h-72">
+            <Line
+              data={deptServiceRequestsChartData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    position: 'top',
+                    labels: {
+                      usePointStyle: true,
+                      padding: 10,
+                    },
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: (context) => {
+                        const value = context.parsed.y ?? 0;
+                        if (value >= 1000000) return `${context.dataset.label}: ${(value / 1000000).toFixed(1)}M`;
+                        if (value >= 1000) return `${context.dataset.label}: ${(value / 1000).toFixed(1)}K`;
+                        return `${context.dataset.label}: ${value}`;
+                      },
+                    },
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    ticks: {
+                      callback: (value: string | number) => {
+                        if (typeof value === 'number') {
+                          if (value >= 1000000) return (value / 1000000).toFixed(0) + 'M';
+                          if (value >= 1000) return (value / 1000).toFixed(0) + 'K';
+                        }
+                        return value;
+                      },
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 3. Department Token Usage Stats */}
       <div className="bg-white rounded-2xl shadow-card p-6">
         <div className="flex items-center gap-2 mb-4">
           <Building2 className="w-5 h-5 text-samsung-blue" />
