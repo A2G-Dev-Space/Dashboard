@@ -484,21 +484,36 @@ export default function UnifiedUsers() {
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
                         {user.globalRole ? (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border ${roleColors[user.globalRole]}`}>
-                            <Shield className="w-3 h-3" />
-                            {roleLabels[user.globalRole]}
-                            {user.isEnvDeveloper && ' (ENV)'}
-                          </span>
+                          <>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border ${roleColors[user.globalRole]}`}>
+                              <Shield className="w-3 h-3" />
+                              {roleLabels[user.globalRole]}
+                              {user.isEnvDeveloper && ' (ENV)'}
+                            </span>
+                            {/* SERVICE_ADMIN/SERVICE_VIEWER의 경우 서비스 목록 표시 */}
+                            {(user.globalRole === 'SERVICE_ADMIN' || user.globalRole === 'SERVICE_VIEWER') && user.servicePermissions.length > 0 && (
+                              <div className="w-full mt-1 flex flex-wrap gap-1">
+                                {user.servicePermissions.map(sp => (
+                                  <span key={sp.serviceId} className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded border ${
+                                    sp.role === 'SERVICE_ADMIN' ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-cyan-50 text-cyan-600 border-cyan-200'
+                                  }`}>
+                                    {sp.serviceName}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {/* SERVICE_ADMIN/SERVICE_VIEWER인데 서비스가 없으면 경고 표시 */}
+                            {(user.globalRole === 'SERVICE_ADMIN' || user.globalRole === 'SERVICE_VIEWER') && user.servicePermissions.length === 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-yellow-50 text-yellow-600 rounded border border-yellow-200">
+                                ⚠️ 서비스 미지정
+                              </span>
+                            )}
+                          </>
                         ) : (
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border ${roleColors.USER}`}>
                             {roleLabels.USER}
                           </span>
                         )}
-                        {user.servicePermissions.map(sp => (
-                          <span key={sp.serviceId} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-pastel-100 text-pastel-600 rounded border border-pastel-200">
-                            {sp.serviceName}: {roleLabels[sp.role] || sp.role}
-                          </span>
-                        ))}
                       </div>
                     </td>
                     <td className="px-4 py-3">
@@ -536,15 +551,19 @@ export default function UnifiedUsers() {
                       <div className="text-sm font-medium text-pastel-700">
                         {user.totalRequests.toLocaleString()}회
                       </div>
-                      {user.serviceStats.length > 1 && expandedRows.has(user.id) && (
-                        <div className="mt-2 pt-2 border-t border-pastel-100 space-y-1">
+                      {/* 서비스별 요청 수 항상 표시 */}
+                      {user.serviceStats.length > 0 && (
+                        <div className="mt-1.5 space-y-0.5">
                           {user.serviceStats.map(ss => (
-                            <div key={ss.serviceId} className="text-xs text-pastel-600 flex justify-between">
-                              <span>{ss.serviceName}:</span>
-                              <span className="font-medium">{ss.requestCount.toLocaleString()}회</span>
+                            <div key={ss.serviceId} className="text-xs text-pastel-500 flex justify-between items-center gap-2">
+                              <span className="truncate">{ss.serviceName}</span>
+                              <span className="font-medium text-pastel-600 whitespace-nowrap">{ss.requestCount.toLocaleString()}</span>
                             </div>
                           ))}
                         </div>
+                      )}
+                      {user.serviceStats.length === 0 && (
+                        <div className="text-xs text-pastel-400 mt-1">-</div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">

@@ -15,6 +15,32 @@ import { redis } from '../index.js';
 export const authRoutes = Router();
 
 /**
+ * URL 인코딩된 텍스트 디코딩 (한글 등)
+ */
+function safeDecodeURIComponent(text: string): string {
+  if (!text) return text;
+  try {
+    if (!text.includes('%')) return text;
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * deptname에서 businessUnit 추출
+ */
+function extractBusinessUnit(deptname: string): string {
+  if (!deptname) return '';
+  // "팀이름(사업부)" 형식에서 사업부 추출
+  const match = deptname.match(/\(([^)]+)\)/);
+  if (match) return match[1];
+  // "사업부/팀이름" 형식
+  const parts = deptname.split('/');
+  return parts[0]?.trim() || '';
+}
+
+/**
  * POST /auth/callback
  * SSO callback - sync user with database
  */
@@ -25,7 +51,11 @@ authRoutes.post('/callback', authenticateToken, async (req: AuthenticatedRequest
       return;
     }
 
-    const { loginid, deptname, username } = req.user;
+    const loginid = req.user.loginid;
+    // URL 인코딩된 한글 디코딩
+    const deptname = safeDecodeURIComponent(req.user.deptname || '');
+    const username = safeDecodeURIComponent(req.user.username || '');
+    const businessUnit = extractBusinessUnit(deptname);
 
     // Upsert user in database
     const user = await prisma.user.upsert({
@@ -33,12 +63,14 @@ authRoutes.post('/callback', authenticateToken, async (req: AuthenticatedRequest
       update: {
         deptname,
         username,
+        businessUnit,
         lastActive: new Date(),
       },
       create: {
         loginid,
         deptname,
         username,
+        businessUnit,
       },
     });
 
@@ -154,7 +186,11 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
       return;
     }
 
-    const { loginid, deptname, username } = req.user;
+    const loginid = req.user.loginid;
+    // URL 인코딩된 한글 디코딩
+    const deptname = safeDecodeURIComponent(req.user.deptname || '');
+    const username = safeDecodeURIComponent(req.user.username || '');
+    const businessUnit = extractBusinessUnit(deptname);
 
     // Upsert user in database
     const user = await prisma.user.upsert({
@@ -162,12 +198,14 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
       update: {
         deptname,
         username,
+        businessUnit,
         lastActive: new Date(),
       },
       create: {
         loginid,
         deptname,
         username,
+        businessUnit,
       },
     });
 
