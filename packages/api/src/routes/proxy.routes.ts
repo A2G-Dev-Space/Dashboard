@@ -83,10 +83,14 @@ async function getServiceIdFromRequest(req: Request): Promise<{ serviceId: strin
 
 /**
  * deptname에서 businessUnit 추출
- * "DS/AI팀" → "DS", "메모리사업부/설계팀" → "메모리사업부"
+ * "S/W혁신팀(S.LSI)" → "S.LSI", "DS/AI팀" → "DS"
  */
 function extractBusinessUnit(deptname: string): string {
   if (!deptname) return '';
+  // "팀이름(사업부)" 형식에서 사업부 추출
+  const match = deptname.match(/\(([^)]+)\)/);
+  if (match) return match[1];
+  // "사업부/팀이름" 형식
   const parts = deptname.split('/');
   return parts[0]?.trim() || '';
 }
