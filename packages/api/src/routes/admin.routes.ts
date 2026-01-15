@@ -628,7 +628,7 @@ adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, r
         INNER JOIN users u ON ul.user_id = u.id
         WHERE ul.timestamp >= ${startDate}
           AND u.loginid != 'anonymous'
-          AND ul.service_id = ${serviceId}::uuid
+          AND ul.service_id::text = ${serviceId}
         GROUP BY DATE(ul.timestamp)
         ORDER BY date ASC
       `;
@@ -659,7 +659,7 @@ adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, r
         INNER JOIN users u ON ul.user_id = u.id
         WHERE ul.timestamp >= ${startDate}
           AND u.loginid != 'anonymous'
-          AND ul.service_id = ${serviceId}::uuid
+          AND ul.service_id::text = ${serviceId}
       `;
     } else {
       totalUsers = await prisma.$queryRaw`
@@ -706,7 +706,7 @@ adminRoutes.get('/stats/cumulative-users', async (req: AuthenticatedRequest, res
           FROM usage_logs ul
           INNER JOIN users u ON ul.user_id = u.id
           WHERE u.loginid != 'anonymous'
-            AND ul.service_id = ${serviceId}::uuid
+            AND ul.service_id::text = ${serviceId}
           GROUP BY ul.user_id
         ) as user_first
         WHERE first_usage >= ${startDate}
@@ -720,7 +720,7 @@ adminRoutes.get('/stats/cumulative-users', async (req: AuthenticatedRequest, res
         INNER JOIN users u ON ul.user_id = u.id
         WHERE ul.timestamp < ${startDate}
           AND u.loginid != 'anonymous'
-          AND ul.service_id = ${serviceId}::uuid
+          AND ul.service_id::text = ${serviceId}
       `;
     } else {
       userFirstUsage = await prisma.$queryRaw`
@@ -805,7 +805,7 @@ adminRoutes.get('/stats/model-daily-trend', async (req: AuthenticatedRequest, re
         SELECT DATE(timestamp) as date, model_id, SUM("totalTokens") as total_tokens
         FROM usage_logs
         WHERE timestamp >= ${startDate}
-          AND service_id = ${serviceId}::uuid
+          AND service_id::text = ${serviceId}
         GROUP BY DATE(timestamp), model_id
         ORDER BY date ASC
       `;
@@ -915,10 +915,10 @@ adminRoutes.get('/stats/model-user-trend', async (req: AuthenticatedRequest, res
       dailyStats = await prisma.$queryRaw`
         SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
         FROM usage_logs
-        WHERE model_id = ${modelId}::uuid
-          AND user_id = ANY(${topUserIds}::uuid[])
+        WHERE model_id::text = ${modelId}
+          AND user_id::text = ANY(${topUserIds})
           AND timestamp >= ${startDate}
-          AND service_id = ${serviceId}::uuid
+          AND service_id::text = ${serviceId}
         GROUP BY DATE(timestamp), user_id
         ORDER BY date ASC
       `;
@@ -926,8 +926,8 @@ adminRoutes.get('/stats/model-user-trend', async (req: AuthenticatedRequest, res
       dailyStats = await prisma.$queryRaw`
         SELECT DATE(timestamp) as date, user_id, SUM("totalTokens") as total_tokens
         FROM usage_logs
-        WHERE model_id = ${modelId}::uuid
-          AND user_id = ANY(${topUserIds}::uuid[])
+        WHERE model_id::text = ${modelId}
+          AND user_id::text = ANY(${topUserIds})
           AND timestamp >= ${startDate}
         GROUP BY DATE(timestamp), user_id
         ORDER BY date ASC
@@ -1027,7 +1027,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
             FROM (
               SELECT DATE(timestamp), COUNT(DISTINCT user_id) as user_count
               FROM usage_logs
-              WHERE service_id = ${service.id}::uuid
+              WHERE service_id::text = ${service.id}
                 AND timestamp >= NOW() - INTERVAL '30 days'
               GROUP BY DATE(timestamp)
             ) daily_counts
@@ -1165,7 +1165,7 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
         INNER JOIN users u ON ul.user_id = u.id
         WHERE u.loginid != 'anonymous'
           AND u.deptname != ''
-          AND ul.service_id = ${serviceId}::uuid
+          AND ul.service_id::text = ${serviceId}
         GROUP BY u.deptname
         ORDER BY user_count DESC
       `;
@@ -1192,7 +1192,7 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
           WHERE u.loginid != 'anonymous'
             AND u.deptname != ''
             AND ul.timestamp >= ${startDate}
-            AND ul.service_id = ${serviceId}::uuid
+            AND ul.service_id::text = ${serviceId}
           GROUP BY u.deptname, DATE(ul.timestamp)
         ) daily_stats
         GROUP BY deptname
@@ -1222,7 +1222,7 @@ adminRoutes.get('/stats/global/by-dept', async (req: AuthenticatedRequest, res) 
         INNER JOIN models m ON ul.model_id = m.id
         WHERE u.loginid != 'anonymous'
           AND u.deptname != ''
-          AND ul.service_id = ${serviceId}::uuid
+          AND ul.service_id::text = ${serviceId}
         GROUP BY u.deptname, m.name
         ORDER BY u.deptname, total_tokens DESC
       `;

@@ -171,7 +171,7 @@ myUsageRoutes.get('/daily', async (req: AuthenticatedRequest, res) => {
         FROM usage_logs
         WHERE user_id = ${user.id}
           AND timestamp >= ${startDate}
-          AND service_id = ${serviceId}::uuid
+          AND service_id::text = ${serviceId}
         GROUP BY DATE(timestamp)
         ORDER BY date ASC
       `;
