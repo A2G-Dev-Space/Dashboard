@@ -221,74 +221,27 @@ RATING_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks;")
 echo -e "${GREEN}✓ Ratings migrated: $RATING_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 11: Decode URL-encoded Korean text...${NC}"
-# Create URL decode function and fix encoded usernames/deptnames
-new_psql -c "
--- Create URL decode function
-CREATE OR REPLACE FUNCTION url_decode(input TEXT)
-RETURNS TEXT AS \$\$
-DECLARE
-    result TEXT;
-BEGIN
-    IF input IS NULL OR input = '' THEN
-        RETURN input;
-    END IF;
+# Use Python for URL decoding (more reliable)
+docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -t -A -c "SELECT id, username, deptname FROM users WHERE position('%' in username) > 0 OR position('%' in deptname) > 0;" | while IFS='|' read -r id username deptname; do
+    if [ -n "$id" ]; then
+        decoded_username=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$username'))" 2>/dev/null || echo "$username")
+        decoded_deptname=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$deptname'))" 2>/dev/null || echo "$deptname")
+        # Extract business_unit from decoded deptname: "부서이름(사업부이름)" → 사업부이름
+        business_unit=$(echo "$decoded_deptname" | grep -oP '(?<=\()[^)]+(?=\))' | head -1)
 
-    -- Check if it looks URL encoded (contains %)
-    IF position('%' in input) = 0 THEN
-        RETURN input;
-    END IF;
+        docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -c "UPDATE users SET username = '$decoded_username', deptname = '$decoded_deptname', business_unit = NULLIF('$business_unit', '') WHERE id = '$id'::uuid;" 2>/dev/null
+    fi
+done
+echo -e "${GREEN}✓ Users URL decoded${NC}"
 
-    BEGIN
-        result := convert_from(
-            decode(
-                regexp_replace(
-                    regexp_replace(input, '%', '', 'g'),
-                    '([0-9A-Fa-f]{2})',
-                    E'\\\\\\\\x\\\\1',
-                    'g'
-                ),
-                'escape'
-            ),
-            'UTF8'
-        );
-        RETURN result;
-    EXCEPTION WHEN OTHERS THEN
-        -- If decode fails, try simpler approach
-        BEGIN
-            SELECT convert_from(
-                decode(
-                    replace(
-                        replace(input, '%', ''),
-                        '+', ' '
-                    ),
-                    'hex'
-                ),
-                'UTF8'
-            ) INTO result;
-            RETURN result;
-        EXCEPTION WHEN OTHERS THEN
-            RETURN input;
-        END;
-    END;
-END;
-\$\$ LANGUAGE plpgsql;
-
--- Update users with decoded values
-UPDATE users SET
-    username = url_decode(username),
-    deptname = url_decode(deptname),
-    business_unit = CASE
-        WHEN url_decode(deptname) ~ '\\(.*\\)'
-        THEN REGEXP_REPLACE(url_decode(deptname), '.*\\((.*)\\).*', '\\1')
-        ELSE business_unit
-    END
-WHERE position('%' in username) > 0 OR position('%' in deptname) > 0;
-
--- Update daily_usage_stats deptname
-UPDATE daily_usage_stats SET
-    deptname = url_decode(deptname)
-WHERE position('%' in deptname) > 0;
-"
+# Update daily_usage_stats deptname
+echo "  Decoding daily_usage_stats..."
+docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -t -A -c "SELECT DISTINCT deptname FROM daily_usage_stats WHERE position('%' in deptname) > 0;" | while read -r deptname; do
+    if [ -n "$deptname" ]; then
+        decoded=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$deptname'))" 2>/dev/null || echo "$deptname")
+        docker exec $NEW_CONTAINER psql -U $NEW_USER -d $NEW_DB -c "UPDATE daily_usage_stats SET deptname = '$decoded' WHERE deptname = '$deptname';" 2>/dev/null
+    fi
+done
 DECODED_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users WHERE position('%' in username) = 0;")
 echo -e "${GREEN}✓ URL decoded. Users with clean names: $DECODED_COUNT${NC}"
 
