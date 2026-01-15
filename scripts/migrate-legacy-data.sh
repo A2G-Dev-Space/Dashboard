@@ -282,14 +282,14 @@ UPDATE users SET
         THEN REGEXP_REPLACE(url_decode(deptname), '.*\\((.*)\\).*', '\\1')
         ELSE business_unit
     END
-WHERE username LIKE '%\\%%' ESCAPE '\\\\' OR deptname LIKE '%\\%%' ESCAPE '\\\\';
+WHERE position('%' in username) > 0 OR position('%' in deptname) > 0;
 
 -- Update daily_usage_stats deptname
 UPDATE daily_usage_stats SET
     deptname = url_decode(deptname)
-WHERE deptname LIKE '%\\%%' ESCAPE '\\\\';
+WHERE position('%' in deptname) > 0;
 "
-DECODED_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users WHERE username NOT LIKE '%\\%%' ESCAPE '\\\\';")
+DECODED_COUNT=$(new_psql -t -A -c "SELECT COUNT(*) FROM users WHERE position('%' in username) = 0;")
 echo -e "${GREEN}✓ URL decoded. Users with clean names: $DECODED_COUNT${NC}"
 
 echo -e "\n${YELLOW}Step 12: Create UserService records...${NC}"
