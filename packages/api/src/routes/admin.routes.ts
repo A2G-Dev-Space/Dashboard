@@ -2092,10 +2092,10 @@ adminRoutes.delete('/users/:id/demote', requireSuperAdmin as RequestHandler, asy
 
 /**
  * GET /admin/unified-users
- * 통합 사용자 관리 목록
+ * 통합 사용자 관리 목록 (SUPER_ADMIN만)
  * Query: ?page=, ?limit=, ?serviceId=, ?businessUnit=, ?deptname=, ?role=, ?search=
  */
-adminRoutes.get('/unified-users', async (req: AuthenticatedRequest, res) => {
+adminRoutes.get('/unified-users', requireSuperAdmin as RequestHandler, async (req: AuthenticatedRequest, res) => {
   try {
     const page = parseInt(req.query['page'] as string) || 1;
     const limit = parseInt(req.query['limit'] as string) || 50;
