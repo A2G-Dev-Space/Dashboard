@@ -67,20 +67,24 @@ async function main() {
     where: { serviceId: null },
   });
   if (logsWithoutService > 0) {
-    // 대량 업데이트를 위해 배치 처리
+    // 대량 업데이트를 위해 배치 처리 (PostgreSQL 호환)
     const batchSize = 10000;
-    let updated = 0;
-    while (updated < logsWithoutService) {
-      await prisma.$executeRaw`
+    let totalUpdated = 0;
+    while (totalUpdated < logsWithoutService) {
+      const result = await prisma.$executeRaw`
         UPDATE usage_logs
         SET service_id = ${serviceId}::uuid
-        WHERE service_id IS NULL
-        LIMIT ${batchSize}
+        WHERE id IN (
+          SELECT id FROM usage_logs
+          WHERE service_id IS NULL
+          LIMIT ${batchSize}
+        )
       `;
-      updated += batchSize;
-      console.log(`  ... updated ${Math.min(updated, logsWithoutService)}/${logsWithoutService}`);
+      totalUpdated += Number(result);
+      console.log(`  ... updated ${totalUpdated}/${logsWithoutService}`);
+      if (Number(result) === 0) break; // 더 이상 업데이트할 레코드 없음
     }
-    console.log(`  ✓ Updated ${logsWithoutService} usage logs`);
+    console.log(`  ✓ Updated ${totalUpdated} usage logs`);
   } else {
     console.log('  ✓ All usage logs already have serviceId');
   }

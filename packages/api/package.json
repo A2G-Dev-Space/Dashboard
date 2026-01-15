@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "migrate:multi-service": "tsx scripts/migrate-to-multi-service.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
