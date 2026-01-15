@@ -51,8 +51,9 @@ async function getDefaultServiceId(): Promise<string | null> {
 /**
  * 요청에서 서비스 ID 추출
  * X-Service-Id 헤더가 있으면 해당 서비스, 없으면 기본 서비스
+ * @returns { serviceId: string | null, error: string | null }
  */
-async function getServiceIdFromRequest(req: Request): Promise<string | null> {
+async function getServiceIdFromRequest(req: Request): Promise<{ serviceId: string | null; error: string | null }> {
   const serviceHeader = req.headers['x-service-id'] as string | undefined;
 
   if (serviceHeader) {
@@ -68,13 +69,16 @@ async function getServiceIdFromRequest(req: Request): Promise<string | null> {
     });
 
     if (service) {
-      return service.id;
+      return { serviceId: service.id, error: null };
     }
-    console.warn(`[Service] Service '${serviceHeader}' from header not found, using default`);
+    // 명시적으로 서비스를 지정했지만 등록되지 않은 경우 → 거부
+    console.warn(`[Service] Unregistered service '${serviceHeader}' rejected`);
+    return { serviceId: null, error: `Service '${serviceHeader}' is not registered. Please contact admin to register your service.` };
   }
 
-  // 헤더가 없거나 찾지 못한 경우 기본 서비스 사용
-  return getDefaultServiceId();
+  // 헤더가 없는 경우 기본 서비스 사용 (null → nexus-coder)
+  const defaultServiceId = await getDefaultServiceId();
+  return { serviceId: defaultServiceId, error: null };
 }
 
 /**
@@ -236,7 +240,13 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     const user = await getOrCreateUser(req);
 
     // Get service ID from header or use default
-    const serviceId = await getServiceIdFromRequest(req);
+    const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
+
+    // Reject requests from unregistered services
+    if (serviceError) {
+      res.status(403).json({ error: serviceError });
+      return;
+    }
 
     // Prepare request to actual LLM
     const llmRequestBody = {

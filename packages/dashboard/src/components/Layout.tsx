@@ -103,7 +103,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
       if (location.pathname.includes('/users')) return `${service?.displayName || ''} 사용자`;
       return `${service?.displayName || ''} 대시보드`;
     }
-    return 'Nexus Portal';
+    return 'AX Portal';
   };
 
   // 역할 표시 텍스트
@@ -130,9 +130,9 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
         {/* Logo */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-pastel-100 sticky top-0 bg-white z-10">
           <Link to="/" className="flex items-center gap-3" onClick={() => setSidebarOpen(false)}>
-            <img src="/logo.png" alt="Nexus Portal" className="w-10 h-10 rounded-xl" />
+            <img src="/logo.png" alt="AX Portal" className="w-10 h-10 rounded-xl" />
             <div>
-              <h1 className="font-bold text-lg tracking-tight text-pastel-800">Nexus Portal</h1>
+              <h1 className="font-bold text-lg tracking-tight text-pastel-800">AX Portal</h1>
               <p className="text-[10px] text-pastel-500 uppercase tracking-wider">Multi-Service</p>
             </div>
           </Link>

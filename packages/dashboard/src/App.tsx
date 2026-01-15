@@ -107,7 +107,7 @@ function App() {
         {isAdmin && (
           <>
             {/* 통합 대시보드 (메인) */}
-            <Route path="/" element={<MainDashboard />} />
+            <Route path="/" element={<MainDashboard adminRole={adminRole} />} />
 
             {/* 서비스별 라우트 */}
             <Route path="/service/:serviceId" element={<ServiceDashboardWrapper />} />
