@@ -1726,21 +1726,11 @@ adminRoutes.get('/stats/global/by-dept-users-daily', async (req: AuthenticatedRe
     `;
 
     // 3. Build response with cumulative users
-    const dateMap = new Map<string, Record<string, { active: number; cumulative: number }>>();
     const cumulativeUsers = new Map<string, Set<string>>(); // Track unique users per BU
 
     // Initialize
     for (const bu of topBUNames) {
       cumulativeUsers.set(bu, new Set());
-    }
-
-    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0]!;
-      const initialData: Record<string, { active: number; cumulative: number }> = {};
-      for (const bu of topBUNames) {
-        initialData[bu] = { active: 0, cumulative: cumulativeUsers.get(bu)?.size || 0 };
-      }
-      dateMap.set(dateStr, initialData);
     }
 
     // Get all user_ids per day per BU for cumulative calculation
@@ -1754,39 +1744,56 @@ adminRoutes.get('/stats/global/by-dept-users-daily', async (req: AuthenticatedRe
       ORDER BY date ASC
     `;
 
-    // Build cumulative counts
+    // Group users by date and BU
+    const usersByDateBU = new Map<string, Map<string, string[]>>();
     for (const row of usersByDayBU) {
       const dateStr = formatDateToString(row.date);
-      const buSet = cumulativeUsers.get(row.business_unit);
-      if (buSet) {
-        buSet.add(row.user_id);
-        const existing = dateMap.get(dateStr);
-        if (existing && existing[row.business_unit]) {
-          existing[row.business_unit].cumulative = buSet.size;
+      if (!usersByDateBU.has(dateStr)) {
+        usersByDateBU.set(dateStr, new Map());
+      }
+      const buMap = usersByDateBU.get(dateStr)!;
+      if (!buMap.has(row.business_unit)) {
+        buMap.set(row.business_unit, []);
+      }
+      buMap.get(row.business_unit)!.push(row.user_id);
+    }
+
+    // Build chart data with proper cumulative calculation
+    const chartData: Array<Record<string, string | number>> = [];
+
+    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0]!;
+      const dayData = usersByDateBU.get(dateStr);
+
+      // Add users from this day to cumulative sets
+      if (dayData) {
+        for (const [bu, userIds] of dayData.entries()) {
+          const buSet = cumulativeUsers.get(bu);
+          if (buSet) {
+            for (const userId of userIds) {
+              buSet.add(userId);
+            }
+          }
         }
       }
+
+      // Create data point with current cumulative values
+      const item: Record<string, string | number> = { date: dateStr };
+      for (const bu of topBUNames) {
+        item[`${bu}_cumulative`] = cumulativeUsers.get(bu)?.size || 0;
+        item[`${bu}_active`] = 0; // Will be filled below
+      }
+      chartData.push(item);
     }
 
     // Fill in active users
     for (const stat of dailyStats) {
       const dateStr = formatDateToString(stat.date);
-      const existing = dateMap.get(dateStr);
-      if (existing && existing[stat.business_unit]) {
-        existing[stat.business_unit].active = Number(stat.active_users);
+      const dataPoint = chartData.find(d => d.date === dateStr);
+      if (dataPoint) {
+        dataPoint[`${stat.business_unit}_active`] = Number(stat.active_users);
       }
     }
-
-    // Flatten for chart
-    const chartData = Array.from(dateMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, buData]) => {
-        const item: Record<string, string | number> = { date };
-        for (const bu of topBUNames) {
-          item[`${bu}_active`] = buData[bu]?.active || 0;
-          item[`${bu}_cumulative`] = buData[bu]?.cumulative || 0;
-        }
-        return item;
-      });
 
     res.json({
       businessUnits: topBUNames,
