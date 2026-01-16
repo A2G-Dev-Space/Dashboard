@@ -236,8 +236,12 @@ proxyRoutes.get('/models', async (_req: Request, res: Response) => {
         name: true,
         displayName: true,
         maxTokens: true,
+        sortOrder: true,
       },
-      orderBy: { displayName: 'asc' },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { displayName: 'asc' },  // sortOrder가 같으면 displayName 순
+      ],
     });
 
     // OpenAI-compatible format

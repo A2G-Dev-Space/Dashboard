@@ -85,6 +85,7 @@ model Model {
   apiKey      String?
   maxTokens   Int      @default(128000)
   enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")  // 정렬 순서 (낮을수록 먼저)
   createdAt   DateTime @default(now())
   createdBy   String?
 

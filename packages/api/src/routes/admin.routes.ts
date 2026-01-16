@@ -88,7 +88,10 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
           select: { id: true, name: true, displayName: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { displayName: 'asc' },
+      ],
     });
 
     // Mask API keys
@@ -254,6 +257,43 @@ adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
   } catch (error) {
     console.error('Delete model error:', error);
     res.status(500).json({ error: 'Failed to delete model' });
+  }
+});
+
+/**
+ * PUT /admin/models/reorder
+ * Reorder models
+ * Body: { modelIds: string[] } - 순서대로 정렬된 모델 ID 배열
+ */
+adminRoutes.put('/models/reorder', async (req: AuthenticatedRequest, res) => {
+  try {
+    // Check write access
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot reorder models.' });
+      return;
+    }
+
+    const { modelIds } = req.body;
+
+    if (!Array.isArray(modelIds) || modelIds.length === 0) {
+      res.status(400).json({ error: 'modelIds must be a non-empty array' });
+      return;
+    }
+
+    // Update sort order for each model
+    const updates = modelIds.map((id: string, index: number) =>
+      prisma.model.update({
+        where: { id },
+        data: { sortOrder: index },
+      })
+    );
+
+    await prisma.$transaction(updates);
+
+    res.json({ success: true, count: modelIds.length });
+  } catch (error) {
+    console.error('Reorder models error:', error);
+    res.status(500).json({ error: 'Failed to reorder models' });
   }
 });
 

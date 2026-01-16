@@ -60,6 +60,7 @@ export const modelsApi = {
   create: (data: CreateModelData) => api.post('/admin/models', data),
   update: (id: string, data: Partial<CreateModelData>) => api.put(`/admin/models/${id}`, data),
   delete: (id: string, force = false) => api.delete(`/admin/models/${id}`, { params: { force } }),
+  reorder: (modelIds: string[]) => api.put('/admin/models/reorder', { modelIds }),
 };
 
 export const usersApi = {

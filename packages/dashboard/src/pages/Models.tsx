@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
 
 interface Model {
@@ -10,6 +10,7 @@ interface Model {
   apiKey: string | null;
   maxTokens: number;
   enabled: boolean;
+  sortOrder: number;
   createdAt: string;
   creator?: { loginid: string };
   serviceId?: string;
@@ -32,6 +33,10 @@ export default function Models({ serviceId }: ModelsProps) {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingModel, setEditingModel] = useState<Model | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const dragRef = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => {
     loadData();
@@ -106,6 +111,57 @@ export default function Models({ serviceId }: ModelsProps) {
     }
   };
 
+  // Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', '');
+    if (dragRef.current) {
+      dragRef.current.style.opacity = '0.5';
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+    if (dragRef.current) {
+      dragRef.current.style.opacity = '1';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      handleDragEnd();
+      return;
+    }
+
+    // Reorder models locally
+    const newModels = [...models];
+    const [draggedModel] = newModels.splice(draggedIndex, 1);
+    newModels.splice(dropIndex, 0, draggedModel);
+    setModels(newModels);
+    handleDragEnd();
+
+    // Save to server
+    setIsSavingOrder(true);
+    try {
+      await modelsApi.reorder(newModels.map(m => m.id));
+    } catch (error) {
+      console.error('Failed to save model order:', error);
+      // Revert on error
+      loadData();
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -142,9 +198,18 @@ export default function Models({ serviceId }: ModelsProps) {
 
       {/* Models Table */}
       <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+        {isSavingOrder && (
+          <div className="px-4 py-2 bg-blue-50 border-b border-blue-200 text-sm text-blue-600 flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+            순서 저장 중...
+          </div>
+        )}
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
+                <span className="sr-only">순서</span>
+              </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Model
               </th>
@@ -163,8 +228,22 @@ export default function Models({ serviceId }: ModelsProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {models.map((model) => (
-              <tr key={model.id} className="hover:bg-gray-50">
+            {models.map((model, index) => (
+              <tr
+                key={model.id}
+                ref={draggedIndex === index ? dragRef : null}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                className={`hover:bg-gray-50 transition-colors ${
+                  dragOverIndex === index ? 'bg-blue-50 border-t-2 border-blue-400' : ''
+                } ${draggedIndex === index ? 'opacity-50' : ''}`}
+              >
+                <td className="px-3 py-4 cursor-grab active:cursor-grabbing">
+                  <GripVertical className="w-5 h-5 text-gray-400 hover:text-gray-600" />
+                </td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-samsung-blue/10 rounded-xl">
@@ -229,7 +308,7 @@ export default function Models({ serviceId }: ModelsProps) {
             ))}
             {models.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                   No models configured. Click "Add Model" to create one.
                 </td>
               </tr>
