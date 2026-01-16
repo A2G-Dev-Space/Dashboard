@@ -280,8 +280,22 @@ adminRoutes.put('/models/reorder', async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    // Update sort order for each model
-    const updates = modelIds.map((id: string, index: number) =>
+    // Verify all model IDs exist first
+    const existingModels = await prisma.model.findMany({
+      where: { id: { in: modelIds } },
+      select: { id: true },
+    });
+
+    const existingIds = new Set(existingModels.map(m => m.id));
+    const validModelIds = modelIds.filter((id: string) => existingIds.has(id));
+
+    if (validModelIds.length === 0) {
+      res.status(400).json({ error: 'No valid model IDs provided' });
+      return;
+    }
+
+    // Update sort order for each valid model
+    const updates = validModelIds.map((id: string, index: number) =>
       prisma.model.update({
         where: { id },
         data: { sortOrder: index },
@@ -290,7 +304,7 @@ adminRoutes.put('/models/reorder', async (req: AuthenticatedRequest, res) => {
 
     await prisma.$transaction(updates);
 
-    res.json({ success: true, count: modelIds.length });
+    res.json({ success: true, count: validModelIds.length });
   } catch (error) {
     console.error('Reorder models error:', error);
     res.status(500).json({ error: 'Failed to reorder models' });
