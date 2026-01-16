@@ -87,7 +87,7 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
 
   const loadServices = async () => {
     try {
-      const response = await serviceApi.listAll();
+      const response = await serviceApi.list();
       setServices(response.data.services || []);
     } catch (error) {
       console.error('Failed to load services:', error);
