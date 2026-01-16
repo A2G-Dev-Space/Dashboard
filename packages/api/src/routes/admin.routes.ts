@@ -2425,9 +2425,9 @@ adminRoutes.get('/stats/latency', async (req: AuthenticatedRequest, res) => {
     }>>`
       SELECT
         s.id as service_id,
-        s.display_name as service_name,
+        s."displayName" as service_name,
         m.id as model_id,
-        m.display_name as model_name,
+        m."displayName" as model_name,
         AVG(CASE WHEN ul.timestamp >= ${tenMinutesAgo} THEN ul.latency_ms END) as avg_10m,
         AVG(CASE WHEN ul.timestamp >= ${thirtyMinutesAgo} THEN ul.latency_ms END) as avg_30m,
         AVG(CASE WHEN ul.timestamp >= ${oneHourAgo} THEN ul.latency_ms END) as avg_1h,
@@ -2441,8 +2441,8 @@ adminRoutes.get('/stats/latency', async (req: AuthenticatedRequest, res) => {
       INNER JOIN models m ON ul.model_id = m.id
       WHERE ul.latency_ms IS NOT NULL
         AND ul.timestamp >= ${oneDayAgo}
-      GROUP BY s.id, s.display_name, m.id, m.display_name
-      ORDER BY s.display_name, m.display_name
+      GROUP BY s.id, s."displayName", m.id, m."displayName"
+      ORDER BY s."displayName", m."displayName"
     `;
 
     // 결과 포맷팅
@@ -2495,9 +2495,9 @@ adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res)
         date_trunc('hour', ul.timestamp) +
           (EXTRACT(minute FROM ul.timestamp)::int / ${interval}) * interval '${interval} minutes' as time_bucket,
         s.id as service_id,
-        s.display_name as service_name,
+        s."displayName" as service_name,
         m.id as model_id,
-        m.display_name as model_name,
+        m."displayName" as model_name,
         AVG(ul.latency_ms) as avg_latency,
         COUNT(*) as request_count
       FROM usage_logs ul
@@ -2505,8 +2505,8 @@ adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res)
       INNER JOIN models m ON ul.model_id = m.id
       WHERE ul.latency_ms IS NOT NULL
         AND ul.timestamp >= ${startTime}
-      GROUP BY time_bucket, s.id, s.display_name, m.id, m.display_name
-      ORDER BY time_bucket ASC, s.display_name, m.display_name
+      GROUP BY time_bucket, s.id, s."displayName", m.id, m."displayName"
+      ORDER BY time_bucket ASC, s."displayName", m."displayName"
     `;
 
     // 서비스+모델 조합별로 그룹화
