@@ -12,6 +12,35 @@ import { trackActiveUser } from '../services/redis.service.js';
 import { redis } from '../index.js';
 export const authRoutes = Router();
 /**
+ * URL 인코딩된 텍스트 디코딩 (한글 등)
+ */
+function safeDecodeURIComponent(text) {
+    if (!text)
+        return text;
+    try {
+        if (!text.includes('%'))
+            return text;
+        return decodeURIComponent(text);
+    }
+    catch {
+        return text;
+    }
+}
+/**
+ * deptname에서 businessUnit 추출
+ */
+function extractBusinessUnit(deptname) {
+    if (!deptname)
+        return '';
+    // "팀이름(사업부)" 형식에서 사업부 추출
+    const match = deptname.match(/\(([^)]+)\)/);
+    if (match)
+        return match[1];
+    // "사업부/팀이름" 형식
+    const parts = deptname.split('/');
+    return parts[0]?.trim() || '';
+}
+/**
  * POST /auth/callback
  * SSO callback - sync user with database
  */
@@ -21,19 +50,25 @@ authRoutes.post('/callback', authenticateToken, async (req, res) => {
             res.status(401).json({ error: 'Authentication required' });
             return;
         }
-        const { loginid, deptname, username } = req.user;
+        const loginid = req.user.loginid;
+        // URL 인코딩된 한글 디코딩
+        const deptname = safeDecodeURIComponent(req.user.deptname || '');
+        const username = safeDecodeURIComponent(req.user.username || '');
+        const businessUnit = extractBusinessUnit(deptname);
         // Upsert user in database
         const user = await prisma.user.upsert({
             where: { loginid },
             update: {
                 deptname,
                 username,
+                businessUnit,
                 lastActive: new Date(),
             },
             create: {
                 loginid,
                 deptname,
                 username,
+                businessUnit,
             },
         });
         // Track active user in Redis
@@ -136,19 +171,25 @@ authRoutes.post('/login', authenticateToken, async (req, res) => {
             res.status(401).json({ error: 'Authentication required' });
             return;
         }
-        const { loginid, deptname, username } = req.user;
+        const loginid = req.user.loginid;
+        // URL 인코딩된 한글 디코딩
+        const deptname = safeDecodeURIComponent(req.user.deptname || '');
+        const username = safeDecodeURIComponent(req.user.username || '');
+        const businessUnit = extractBusinessUnit(deptname);
         // Upsert user in database
         const user = await prisma.user.upsert({
             where: { loginid },
             update: {
                 deptname,
                 username,
+                businessUnit,
                 lastActive: new Date(),
             },
             create: {
                 loginid,
                 deptname,
                 username,
+                businessUnit,
             },
         });
         // Track active user in Redis

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X } from 'lucide-react';
+import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock } from 'lucide-react';
 import { statsApi, serviceApi } from '../services/api';
 
 type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
@@ -100,6 +100,31 @@ interface GlobalTotals {
   totalTokens: number;
 }
 
+interface LatencyStat {
+  serviceId: string;
+  serviceName: string;
+  modelId: string;
+  modelName: string;
+  avg10m: number | null;
+  avg30m: number | null;
+  avg1h: number | null;
+  avg24h: number | null;
+  count10m: number;
+  count30m: number;
+  count1h: number;
+  count24h: number;
+}
+
+interface LatencyHistoryPoint {
+  time: string;
+  avgLatency: number;
+  count: number;
+}
+
+interface LatencyHistory {
+  [key: string]: LatencyHistoryPoint[];
+}
+
 export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [services, setServices] = useState<Service[]>([]);
   const [globalOverview, setGlobalOverview] = useState<GlobalOverviewService[]>([]);
@@ -112,6 +137,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [deptUsersBUs, setDeptUsersBUs] = useState<string[]>([]);
   const [deptServiceRequestsData, setDeptServiceRequestsData] = useState<DeptServiceRequestsDaily[]>([]);
   const [deptServiceCombos, setDeptServiceCombos] = useState<string[]>([]);
+  const [latencyStats, setLatencyStats] = useState<LatencyStat[]>([]);
+  const [latencyHistory, setLatencyHistory] = useState<LatencyHistory>({});
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -127,7 +154,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
   const loadData = async () => {
     try {
-      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes, deptUsersDailyRes, deptServiceReqsRes] = await Promise.all([
+      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes, deptUsersDailyRes, deptServiceReqsRes, latencyRes, latencyHistoryRes] = await Promise.all([
         serviceApi.list(),
         statsApi.globalOverview(),
         statsApi.globalByService(30),
@@ -135,6 +162,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         statsApi.globalByDeptDaily(30, 5),
         statsApi.globalByDeptUsersDaily(30, 5),
         statsApi.globalByDeptServiceRequestsDaily(30, 10),
+        statsApi.latency(),
+        statsApi.latencyHistory(24, 10),
       ]);
 
       setServices(servicesRes.data.services || []);
@@ -148,6 +177,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       setDeptUsersBUs(deptUsersDailyRes.data.businessUnits || []);
       setDeptServiceRequestsData(deptServiceReqsRes.data.chartData || []);
       setDeptServiceCombos(deptServiceReqsRes.data.combinations || []);
+      setLatencyStats(latencyRes.data.stats || []);
+      setLatencyHistory(latencyHistoryRes.data.history || {});
     } catch (error) {
       console.error('Failed to load main dashboard data:', error);
     } finally {
@@ -302,6 +333,28 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     datasets: deptServiceCombos.map((combo, index) => ({
       label: combo,
       data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
+      borderColor: extendedColors[index % extendedColors.length].border,
+      backgroundColor: extendedColors[index % extendedColors.length].bg,
+      borderWidth: 2,
+      fill: false,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    })),
+  };
+
+  // Prepare latency chart data
+  const latencyKeys = Object.keys(latencyHistory);
+  const latencyChartData = {
+    labels: latencyKeys.length > 0
+      ? latencyHistory[latencyKeys[0]]?.map(p => {
+          const time = new Date(p.time);
+          return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+        }) || []
+      : [],
+    datasets: latencyKeys.map((key, index) => ({
+      label: key,
+      data: latencyHistory[key]?.map(p => p.avgLatency) || [],
       borderColor: extendedColors[index % extendedColors.length].border,
       backgroundColor: extendedColors[index % extendedColors.length].bg,
       borderWidth: 2,
@@ -867,6 +920,138 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
           </div>
         )}
       </div>
+
+      {/* LLM Latency Chart - admin/viewer only */}
+      {latencyKeys.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Clock className="w-5 h-5 text-orange-500" />
+            <h2 className="text-lg font-semibold text-gray-900">LLM 응답 지연 시간</h2>
+            <span className="text-xs text-gray-500">(최근 24시간, 10분 간격 평균)</span>
+          </div>
+
+          {/* Current Latency Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            {latencyStats.slice(0, 4).map((stat) => (
+              <div key={`${stat.serviceId}-${stat.modelId}`} className="p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-500 truncate" title={`${stat.serviceName} / ${stat.modelName}`}>
+                  {stat.serviceName} / {stat.modelName.length > 15 ? stat.modelName.slice(0, 15) + '...' : stat.modelName}
+                </p>
+                <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+                  <div>
+                    <span className="text-gray-400">10분:</span>
+                    <span className="ml-1 font-medium">{stat.avg10m ? `${(stat.avg10m / 1000).toFixed(1)}s` : '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">30분:</span>
+                    <span className="ml-1 font-medium">{stat.avg30m ? `${(stat.avg30m / 1000).toFixed(1)}s` : '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">1시간:</span>
+                    <span className="ml-1 font-medium">{stat.avg1h ? `${(stat.avg1h / 1000).toFixed(1)}s` : '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">24시간:</span>
+                    <span className="ml-1 font-medium">{stat.avg24h ? `${(stat.avg24h / 1000).toFixed(1)}s` : '-'}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Latency Line Chart */}
+          <div className="h-72">
+            <Line
+              data={latencyChartData}
+              options={{
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    position: 'top',
+                    labels: {
+                      usePointStyle: true,
+                      padding: 10,
+                    },
+                  },
+                  tooltip: {
+                    callbacks: {
+                      label: (context) => {
+                        const value = context.parsed.y ?? 0;
+                        return `${context.dataset.label}: ${(value / 1000).toFixed(2)}s`;
+                      },
+                    },
+                  },
+                },
+                scales: {
+                  y: {
+                    beginAtZero: true,
+                    title: {
+                      display: true,
+                      text: '응답 시간 (ms)',
+                    },
+                    ticks: {
+                      callback: (value: string | number) => {
+                        const v = Number(value);
+                        if (v >= 1000) return (v / 1000).toFixed(1) + 's';
+                        return v + 'ms';
+                      },
+                    },
+                  },
+                },
+              }}
+            />
+          </div>
+
+          {/* Latency Stats Table */}
+          {latencyStats.length > 0 && (
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-2 font-semibold text-gray-700">서비스 / 모델</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">10분 평균</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">30분 평균</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">1시간 평균</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">24시간 평균</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">요청수 (24h)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latencyStats.map((stat, index) => (
+                    <tr key={`${stat.serviceId}-${stat.modelId}`} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                      <td className="py-3 px-2 font-medium text-gray-900">
+                        {stat.serviceName} / {stat.modelName}
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">
+                        {stat.avg10m ? `${(stat.avg10m / 1000).toFixed(2)}s` : '-'}
+                        {stat.count10m > 0 && <span className="text-xs text-gray-400 ml-1">({stat.count10m})</span>}
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">
+                        {stat.avg30m ? `${(stat.avg30m / 1000).toFixed(2)}s` : '-'}
+                        {stat.count30m > 0 && <span className="text-xs text-gray-400 ml-1">({stat.count30m})</span>}
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">
+                        {stat.avg1h ? `${(stat.avg1h / 1000).toFixed(2)}s` : '-'}
+                        {stat.count1h > 0 && <span className="text-xs text-gray-400 ml-1">({stat.count1h})</span>}
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">
+                        {stat.avg24h ? `${(stat.avg24h / 1000).toFixed(2)}s` : '-'}
+                        {stat.count24h > 0 && <span className="text-xs text-gray-400 ml-1">({stat.count24h})</span>}
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">{formatNumber(stat.count24h)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

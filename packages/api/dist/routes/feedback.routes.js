@@ -17,6 +17,33 @@ function getServiceFilter(serviceId) {
     return serviceId ? { serviceId } : {};
 }
 /**
+ * URL 인코딩된 텍스트 디코딩 (한글 등)
+ */
+function safeDecodeURIComponent(text) {
+    if (!text)
+        return text;
+    try {
+        if (!text.includes('%'))
+            return text;
+        return decodeURIComponent(text);
+    }
+    catch {
+        return text;
+    }
+}
+/**
+ * deptname에서 businessUnit 추출
+ */
+function extractBusinessUnit(deptname) {
+    if (!deptname)
+        return '';
+    const match = deptname.match(/\(([^)]+)\)/);
+    if (match)
+        return match[1];
+    const parts = deptname.split('/');
+    return parts[0]?.trim() || '';
+}
+/**
  * GET /feedback
  * 피드백 목록 조회
  * - Admin: 모든 피드백
@@ -235,14 +262,23 @@ feedbackRoutes.post('/', authenticateToken, async (req, res) => {
                 return;
             }
         }
-        // Get or create user
+        // Get or create user - URL 인코딩된 한글 디코딩
+        const username = safeDecodeURIComponent(req.user.username || '');
+        const deptname = safeDecodeURIComponent(req.user.deptname || '');
+        const businessUnit = extractBusinessUnit(deptname);
         const user = await prisma.user.upsert({
             where: { loginid: req.user.loginid },
-            update: { lastActive: new Date() },
+            update: {
+                lastActive: new Date(),
+                username,
+                deptname,
+                businessUnit,
+            },
             create: {
                 loginid: req.user.loginid,
-                username: req.user.username,
-                deptname: req.user.deptname,
+                username,
+                deptname,
+                businessUnit,
             },
         });
         const feedback = await prisma.feedback.create({

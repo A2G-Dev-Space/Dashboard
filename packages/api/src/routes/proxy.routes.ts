@@ -148,7 +148,8 @@ async function recordUsage(
   modelId: string,
   inputTokens: number,
   outputTokens: number,
-  serviceId: string | null
+  serviceId: string | null,
+  latencyMs?: number
 ) {
   const totalTokens = inputTokens + outputTokens;
 
@@ -161,6 +162,7 @@ async function recordUsage(
       outputTokens,
       totalTokens,
       serviceId,
+      latencyMs,
     },
   });
 
@@ -193,7 +195,7 @@ async function recordUsage(
   // 활성 사용자 추적
   await trackActiveUser(redis, loginid);
 
-  console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
+  console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens}), latency=${latencyMs || 'N/A'}ms`);
 }
 
 /**
@@ -348,11 +350,17 @@ async function handleNonStreamingRequest(
     const url = buildChatCompletionsUrl(model.endpointUrl);
     console.log(`[Proxy] Non-streaming request to: ${url}`);
 
+    // Latency 측정 시작
+    const startTime = Date.now();
+
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody),
     });
+
+    // Latency 측정 종료
+    const latencyMs = Date.now() - startTime;
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -366,13 +374,13 @@ async function handleNonStreamingRequest(
       [key: string]: unknown;
     };
 
-    // Extract and record usage
+    // Extract and record usage with latency
     if (data.usage) {
       const inputTokens = data.usage.prompt_tokens || 0;
       const outputTokens = data.usage.completion_tokens || 0;
 
       // 비동기로 usage 저장 (응답 지연 방지)
-      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
+      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
         console.error('[Usage] Failed to record usage:', err);
       });
     }
@@ -398,6 +406,9 @@ async function handleStreamingRequest(
   user: { id: string; loginid: string },
   serviceId: string | null
 ) {
+  // Latency 측정 시작 (전체 스트리밍 완료까지)
+  const startTime = Date.now();
+
   try {
     const url = buildChatCompletionsUrl(model.endpointUrl);
     console.log(`[Proxy] Streaming request to: ${url}`);
@@ -497,12 +508,15 @@ async function handleStreamingRequest(
       reader.releaseLock();
     }
 
+    // Latency 측정 종료
+    const latencyMs = Date.now() - startTime;
+
     // Record usage if available
     if (usageData) {
       const inputTokens = usageData.prompt_tokens || 0;
       const outputTokens = usageData.completion_tokens || 0;
 
-      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
+      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
         console.error('[Usage] Failed to record streaming usage:', err);
       });
     } else {

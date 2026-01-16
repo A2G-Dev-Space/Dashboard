@@ -2392,3 +2392,146 @@ adminRoutes.put('/unified-users/:id/permissions', requireSuperAdmin as RequestHa
     res.status(500).json({ error: 'Failed to update permissions' });
   }
 });
+
+// ==================== LLM Latency Statistics ====================
+
+/**
+ * GET /admin/stats/latency
+ * LLM 응답 지연시간 통계 (서비스+모델별)
+ * - 10분/30분/1시간/일평균
+ */
+adminRoutes.get('/stats/latency', async (req: AuthenticatedRequest, res) => {
+  try {
+    const now = new Date();
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000);
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // 서비스+모델별 latency 집계 쿼리
+    const latencyStats = await prisma.$queryRaw<Array<{
+      service_id: string;
+      service_name: string;
+      model_id: string;
+      model_name: string;
+      avg_10m: number | null;
+      avg_30m: number | null;
+      avg_1h: number | null;
+      avg_24h: number | null;
+      count_10m: bigint;
+      count_30m: bigint;
+      count_1h: bigint;
+      count_24h: bigint;
+    }>>`
+      SELECT
+        s.id as service_id,
+        s.display_name as service_name,
+        m.id as model_id,
+        m.display_name as model_name,
+        AVG(CASE WHEN ul.timestamp >= ${tenMinutesAgo} THEN ul.latency_ms END) as avg_10m,
+        AVG(CASE WHEN ul.timestamp >= ${thirtyMinutesAgo} THEN ul.latency_ms END) as avg_30m,
+        AVG(CASE WHEN ul.timestamp >= ${oneHourAgo} THEN ul.latency_ms END) as avg_1h,
+        AVG(CASE WHEN ul.timestamp >= ${oneDayAgo} THEN ul.latency_ms END) as avg_24h,
+        COUNT(CASE WHEN ul.timestamp >= ${tenMinutesAgo} AND ul.latency_ms IS NOT NULL THEN 1 END) as count_10m,
+        COUNT(CASE WHEN ul.timestamp >= ${thirtyMinutesAgo} AND ul.latency_ms IS NOT NULL THEN 1 END) as count_30m,
+        COUNT(CASE WHEN ul.timestamp >= ${oneHourAgo} AND ul.latency_ms IS NOT NULL THEN 1 END) as count_1h,
+        COUNT(CASE WHEN ul.timestamp >= ${oneDayAgo} AND ul.latency_ms IS NOT NULL THEN 1 END) as count_24h
+      FROM usage_logs ul
+      INNER JOIN services s ON ul.service_id = s.id
+      INNER JOIN models m ON ul.model_id = m.id
+      WHERE ul.latency_ms IS NOT NULL
+        AND ul.timestamp >= ${oneDayAgo}
+      GROUP BY s.id, s.display_name, m.id, m.display_name
+      ORDER BY s.display_name, m.display_name
+    `;
+
+    // 결과 포맷팅
+    const stats = latencyStats.map(row => ({
+      serviceId: row.service_id,
+      serviceName: row.service_name,
+      modelId: row.model_id,
+      modelName: row.model_name,
+      avg10m: row.avg_10m ? Math.round(row.avg_10m) : null,
+      avg30m: row.avg_30m ? Math.round(row.avg_30m) : null,
+      avg1h: row.avg_1h ? Math.round(row.avg_1h) : null,
+      avg24h: row.avg_24h ? Math.round(row.avg_24h) : null,
+      count10m: Number(row.count_10m),
+      count30m: Number(row.count_30m),
+      count1h: Number(row.count_1h),
+      count24h: Number(row.count_24h),
+    }));
+
+    res.json({ stats, timestamp: now.toISOString() });
+  } catch (error) {
+    console.error('Get latency stats error:', error);
+    res.status(500).json({ error: 'Failed to get latency statistics' });
+  }
+});
+
+/**
+ * GET /admin/stats/latency/history
+ * LLM 응답 지연시간 시계열 데이터 (차트용)
+ * Query: ?hours=24 (기본 24시간), ?interval=10 (분 단위, 기본 10분)
+ */
+adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res) => {
+  try {
+    const hours = Math.min(72, Math.max(1, parseInt(req.query['hours'] as string) || 24));
+    const interval = Math.min(60, Math.max(5, parseInt(req.query['interval'] as string) || 10));
+
+    const startTime = new Date();
+    startTime.setHours(startTime.getHours() - hours);
+
+    // interval 분 단위로 집계
+    const historyData = await prisma.$queryRaw<Array<{
+      time_bucket: Date;
+      service_id: string;
+      service_name: string;
+      model_id: string;
+      model_name: string;
+      avg_latency: number;
+      request_count: bigint;
+    }>>`
+      SELECT
+        date_trunc('hour', ul.timestamp) +
+          (EXTRACT(minute FROM ul.timestamp)::int / ${interval}) * interval '${interval} minutes' as time_bucket,
+        s.id as service_id,
+        s.display_name as service_name,
+        m.id as model_id,
+        m.display_name as model_name,
+        AVG(ul.latency_ms) as avg_latency,
+        COUNT(*) as request_count
+      FROM usage_logs ul
+      INNER JOIN services s ON ul.service_id = s.id
+      INNER JOIN models m ON ul.model_id = m.id
+      WHERE ul.latency_ms IS NOT NULL
+        AND ul.timestamp >= ${startTime}
+      GROUP BY time_bucket, s.id, s.display_name, m.id, m.display_name
+      ORDER BY time_bucket ASC, s.display_name, m.display_name
+    `;
+
+    // 서비스+모델 조합별로 그룹화
+    const groupedData: Record<string, Array<{ time: string; avgLatency: number; count: number }>> = {};
+
+    for (const row of historyData) {
+      const key = `${row.service_name} / ${row.model_name}`;
+      if (!groupedData[key]) {
+        groupedData[key] = [];
+      }
+      groupedData[key].push({
+        time: row.time_bucket.toISOString(),
+        avgLatency: Math.round(row.avg_latency),
+        count: Number(row.request_count),
+      });
+    }
+
+    res.json({
+      history: groupedData,
+      startTime: startTime.toISOString(),
+      endTime: new Date().toISOString(),
+      intervalMinutes: interval,
+    });
+  } catch (error) {
+    console.error('Get latency history error:', error);
+    res.status(500).json({ error: 'Failed to get latency history' });
+  }
+});

@@ -120,6 +120,10 @@ export const statsApi = {
   globalByDeptDaily: (days = 30, topN = 5) => api.get('/admin/stats/global/by-dept-daily', { params: { days, topN } }),
   globalByDeptUsersDaily: (days = 30, topN = 5) => api.get('/admin/stats/global/by-dept-users-daily', { params: { days, topN } }),
   globalByDeptServiceRequestsDaily: (days = 30, topN = 10) => api.get('/admin/stats/global/by-dept-service-requests-daily', { params: { days, topN } }),
+
+  // Latency stats
+  latency: () => api.get('/admin/stats/latency'),
+  latencyHistory: (hours = 24, interval = 10) => api.get('/admin/stats/latency/history', { params: { hours, interval } }),
 };
 
 // 개인 사용량 API

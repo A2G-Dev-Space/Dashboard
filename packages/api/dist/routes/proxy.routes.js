@@ -70,13 +70,35 @@ async function getServiceIdFromRequest(req) {
 }
 /**
  * deptname에서 businessUnit 추출
- * "DS/AI팀" → "DS", "메모리사업부/설계팀" → "메모리사업부"
+ * "S/W혁신팀(S.LSI)" → "S.LSI", "DS/AI팀" → "DS"
  */
 function extractBusinessUnit(deptname) {
     if (!deptname)
         return '';
+    // "팀이름(사업부)" 형식에서 사업부 추출
+    const match = deptname.match(/\(([^)]+)\)/);
+    if (match)
+        return match[1];
+    // "사업부/팀이름" 형식
     const parts = deptname.split('/');
     return parts[0]?.trim() || '';
+}
+/**
+ * URL 인코딩된 텍스트 디코딩 (한글 등)
+ * 디코딩 실패 시 원본 반환
+ */
+function safeDecodeURIComponent(text) {
+    if (!text)
+        return text;
+    try {
+        // 이미 디코딩된 텍스트인지 확인 (% 문자가 없으면 디코딩 불필요)
+        if (!text.includes('%'))
+            return text;
+        return decodeURIComponent(text);
+    }
+    catch {
+        return text;
+    }
 }
 /**
  * 사용자 조회 또는 생성 (upsert)
@@ -84,8 +106,9 @@ function extractBusinessUnit(deptname) {
  */
 async function getOrCreateUser(req) {
     const loginid = req.headers['x-user-id'] || DEFAULT_USER.loginid;
-    const username = req.headers['x-user-name'] || DEFAULT_USER.username;
-    const deptname = req.headers['x-user-dept'] || DEFAULT_USER.deptname;
+    // URL 인코딩된 한글 디코딩
+    const username = safeDecodeURIComponent(req.headers['x-user-name'] || DEFAULT_USER.username);
+    const deptname = safeDecodeURIComponent(req.headers['x-user-dept'] || DEFAULT_USER.deptname);
     const businessUnit = extractBusinessUnit(deptname);
     const user = await prisma.user.upsert({
         where: { loginid },
@@ -106,7 +129,7 @@ async function getOrCreateUser(req) {
 /**
  * Usage 저장 (DB + Redis + UserService)
  */
-async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens, serviceId) {
+async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens, serviceId, latencyMs) {
     const totalTokens = inputTokens + outputTokens;
     // DB에 usage_logs 저장
     await prisma.usageLog.create({
@@ -117,6 +140,7 @@ async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens, 
             outputTokens,
             totalTokens,
             serviceId,
+            latencyMs,
         },
     });
     // UserService 업데이트 (서비스별 사용자 활동 추적)
@@ -145,7 +169,7 @@ async function recordUsage(userId, loginid, modelId, inputTokens, outputTokens, 
     await incrementUsage(redis, userId, modelId, inputTokens, outputTokens);
     // 활성 사용자 추적
     await trackActiveUser(redis, loginid);
-    console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens})`);
+    console.log(`[Usage] Recorded: user=${loginid}, model=${modelId}, service=${serviceId}, tokens=${totalTokens} (in=${inputTokens}, out=${outputTokens}), latency=${latencyMs || 'N/A'}ms`);
 }
 /**
  * endpointUrl에 /chat/completions가 없으면 자동 추가
@@ -275,11 +299,15 @@ async function handleNonStreamingRequest(res, model, requestBody, headers, user,
     try {
         const url = buildChatCompletionsUrl(model.endpointUrl);
         console.log(`[Proxy] Non-streaming request to: ${url}`);
+        // Latency 측정 시작
+        const startTime = Date.now();
         const response = await fetch(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(requestBody),
         });
+        // Latency 측정 종료
+        const latencyMs = Date.now() - startTime;
         if (!response.ok) {
             const errorText = await response.text();
             console.error('LLM error:', errorText);
@@ -287,12 +315,12 @@ async function handleNonStreamingRequest(res, model, requestBody, headers, user,
             return;
         }
         const data = await response.json();
-        // Extract and record usage
+        // Extract and record usage with latency
         if (data.usage) {
             const inputTokens = data.usage.prompt_tokens || 0;
             const outputTokens = data.usage.completion_tokens || 0;
             // 비동기로 usage 저장 (응답 지연 방지)
-            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
+            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
                 console.error('[Usage] Failed to record usage:', err);
             });
         }
@@ -309,6 +337,8 @@ async function handleNonStreamingRequest(res, model, requestBody, headers, user,
  * Streaming에서는 마지막 chunk에 usage 정보가 포함될 수 있음
  */
 async function handleStreamingRequest(res, model, requestBody, headers, user, serviceId) {
+    // Latency 측정 시작 (전체 스트리밍 완료까지)
+    const startTime = Date.now();
     try {
         const url = buildChatCompletionsUrl(model.endpointUrl);
         console.log(`[Proxy] Streaming request to: ${url}`);
@@ -393,11 +423,13 @@ async function handleStreamingRequest(res, model, requestBody, headers, user, se
         finally {
             reader.releaseLock();
         }
+        // Latency 측정 종료
+        const latencyMs = Date.now() - startTime;
         // Record usage if available
         if (usageData) {
             const inputTokens = usageData.prompt_tokens || 0;
             const outputTokens = usageData.completion_tokens || 0;
-            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId).catch((err) => {
+            recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
                 console.error('[Usage] Failed to record streaming usage:', err);
             });
         }

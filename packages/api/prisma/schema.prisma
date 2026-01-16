@@ -154,6 +154,7 @@ model UsageLog {
   inputTokens  Int      @default(0)
   outputTokens Int      @default(0)
   totalTokens  Int      @default(0)
+  latencyMs    Int?     @map("latency_ms")  // LLM 응답 시간 (밀리초), NULL = 기존 데이터
   timestamp    DateTime @default(now())
 
   // 서비스 연결 (nullable for migration, then required)
