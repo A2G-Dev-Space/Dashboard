@@ -2544,8 +2544,19 @@ adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res)
     const hours = Math.min(72, Math.max(1, parseInt(req.query['hours'] as string) || 24));
     const interval = Math.min(60, Math.max(5, parseInt(req.query['interval'] as string) || 10));
 
+    const now = new Date();
     const startTime = new Date();
     startTime.setHours(startTime.getHours() - hours);
+
+    // Generate all time buckets for the range
+    const allBuckets: Date[] = [];
+    const bucketStart = new Date(startTime);
+    // Align to interval boundary
+    bucketStart.setMinutes(Math.floor(bucketStart.getMinutes() / interval) * interval, 0, 0);
+    while (bucketStart <= now) {
+      allBuckets.push(new Date(bucketStart));
+      bucketStart.setMinutes(bucketStart.getMinutes() + interval);
+    }
 
     // interval 분 단위로 집계
     const historyData = await prisma.$queryRaw<Array<{
@@ -2575,25 +2586,43 @@ adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res)
       ORDER BY time_bucket ASC, s."displayName", m."displayName"
     `;
 
-    // 서비스+모델 조합별로 그룹화
-    const groupedData: Record<string, Array<{ time: string; avgLatency: number; count: number }>> = {};
+    // Get unique service/model combinations that have any data in the period
+    const uniqueKeys = new Set<string>();
+    const dataMap = new Map<string, Map<string, { avgLatency: number; count: number }>>();
 
     for (const row of historyData) {
       const key = `${row.service_name} / ${row.model_name}`;
-      if (!groupedData[key]) {
-        groupedData[key] = [];
+      uniqueKeys.add(key);
+
+      if (!dataMap.has(key)) {
+        dataMap.set(key, new Map());
       }
-      groupedData[key].push({
-        time: row.time_bucket.toISOString(),
+      dataMap.get(key)!.set(row.time_bucket.toISOString(), {
         avgLatency: Math.round(row.avg_latency),
         count: Number(row.request_count),
+      });
+    }
+
+    // Build complete history with 0 for missing time buckets
+    const groupedData: Record<string, Array<{ time: string; avgLatency: number; count: number }>> = {};
+
+    for (const key of uniqueKeys) {
+      const keyDataMap = dataMap.get(key)!;
+      groupedData[key] = allBuckets.map(bucket => {
+        const bucketTime = bucket.toISOString();
+        const data = keyDataMap.get(bucketTime);
+        return {
+          time: bucketTime,
+          avgLatency: data?.avgLatency ?? 0,
+          count: data?.count ?? 0,
+        };
       });
     }
 
     res.json({
       history: groupedData,
       startTime: startTime.toISOString(),
-      endTime: new Date().toISOString(),
+      endTime: now.toISOString(),
       intervalMinutes: interval,
     });
   } catch (error) {
