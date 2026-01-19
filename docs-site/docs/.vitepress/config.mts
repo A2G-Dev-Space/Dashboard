@@ -64,7 +64,6 @@ export default defineConfig({
           link: s.basePath
         }))
       },
-      { text: 'Nexus Guide', link: '/guide/getting-started' },
       { text: 'Demos', link: '/demos/' },
       { text: 'Feedback', link: '/feedback', target: '_self' },
     ],
