@@ -661,9 +661,21 @@ adminRoutes.get('/stats/overview', async (req: AuthenticatedRequest, res) => {
     const serviceId = req.query['serviceId'] as string | undefined;
     const serviceFilter = getServiceFilter(serviceId);
 
+    // Calculate active users differently based on whether serviceId is provided
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+
     const [activeUsers, todayUsage, totalUsers, totalModels] = await Promise.all([
-      // Redis active users (전체 시스템)
-      getActiveUserCount(redis),
+      // Active users: service-specific from DB or global from Redis
+      serviceId
+        ? prisma.usageLog.groupBy({
+            by: ['userId'],
+            where: {
+              serviceId,
+              timestamp: { gte: thirtyMinutesAgo },
+              user: { loginid: { not: 'anonymous' } },
+            },
+          }).then((r) => r.length)
+        : getActiveUserCount(redis),
       // Redis today usage (전체 시스템)
       getTodayUsage(redis),
       // DB에서 서비스별 사용자 수
