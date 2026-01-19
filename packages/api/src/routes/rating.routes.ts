@@ -109,7 +109,7 @@ ratingRoutes.get('/stats', async (req, res) => {
             COUNT(*)::bigint as "ratingCount"
           FROM rating_feedbacks r
           LEFT JOIN services s ON r.service_id = s.id
-          WHERE r.timestamp >= ${startDate} AND r.service_id = CAST(${resolvedServiceId} AS uuid)
+          WHERE r.timestamp >= ${startDate} AND r.service_id::text = ${resolvedServiceId}
           GROUP BY DATE(r.timestamp), r.model_name, s.name
           ORDER BY DATE(r.timestamp) ASC, r.model_name ASC
         `
@@ -148,7 +148,7 @@ ratingRoutes.get('/stats', async (req, res) => {
             COUNT(*)::bigint as "totalRatings"
           FROM rating_feedbacks r
           LEFT JOIN services s ON r.service_id = s.id
-          WHERE r.timestamp >= ${startDate} AND r.service_id = CAST(${resolvedServiceId} AS uuid)
+          WHERE r.timestamp >= ${startDate} AND r.service_id::text = ${resolvedServiceId}
           GROUP BY r.model_name, s.name
           ORDER BY "averageRating" DESC
         `
