@@ -335,163 +335,108 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     ]),
   };
 
-  // Service-based color scheme: same service uses same color family
-  const serviceBaseColors: { [key: string]: { r: number; g: number; b: number } } = {
-    'nexus-coder': { r: 59, g: 130, b: 246 },    // Blue
-  };
-
-  // Default color palette for unknown services
-  const defaultColorPalette = [
-    { r: 16, g: 185, b: 129 },   // Emerald
-    { r: 139, g: 92, b: 246 },   // Violet
-    { r: 245, g: 158, b: 11 },   // Amber
-    { r: 236, g: 72, b: 153 },   // Pink
-    { r: 6, g: 182, b: 212 },    // Cyan
-    { r: 234, g: 88, b: 12 },    // Orange
-    { r: 99, g: 102, b: 241 },   // Indigo
+  // Extended color palette for distinct colors
+  const extendedColors = [
+    { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgb(59, 130, 246)' },   // Blue
+    { bg: 'rgba(16, 185, 129, 0.5)', border: 'rgb(16, 185, 129)' },   // Emerald
+    { bg: 'rgba(245, 158, 11, 0.5)', border: 'rgb(245, 158, 11)' },   // Amber
+    { bg: 'rgba(139, 92, 246, 0.5)', border: 'rgb(139, 92, 246)' },   // Violet
+    { bg: 'rgba(236, 72, 153, 0.5)', border: 'rgb(236, 72, 153)' },   // Pink
+    { bg: 'rgba(6, 182, 212, 0.5)', border: 'rgb(6, 182, 212)' },     // Cyan
+    { bg: 'rgba(234, 88, 12, 0.5)', border: 'rgb(234, 88, 12)' },     // Orange
+    { bg: 'rgba(99, 102, 241, 0.5)', border: 'rgb(99, 102, 241)' },   // Indigo
+    { bg: 'rgba(34, 197, 94, 0.5)', border: 'rgb(34, 197, 94)' },     // Green
+    { bg: 'rgba(239, 68, 68, 0.5)', border: 'rgb(239, 68, 68)' },     // Red
+    { bg: 'rgba(168, 85, 247, 0.5)', border: 'rgb(168, 85, 247)' },   // Purple
+    { bg: 'rgba(14, 165, 233, 0.5)', border: 'rgb(14, 165, 233)' },   // Sky
+    { bg: 'rgba(251, 146, 60, 0.5)', border: 'rgb(251, 146, 60)' },   // Orange-light
+    { bg: 'rgba(132, 204, 22, 0.5)', border: 'rgb(132, 204, 22)' },   // Lime
+    { bg: 'rgba(244, 63, 94, 0.5)', border: 'rgb(244, 63, 94)' },     // Rose
   ];
 
-  // Track assigned colors for consistency
-  const serviceColorMap = new Map<string, { r: number; g: number; b: number }>();
-  let nextColorIndex = 0;
-
-  // Get unique services from combos and assign colors
-  const getServiceColor = (serviceName: string, variationIndex: number) => {
-    // Check if we already assigned a color to this service
-    let baseColor = serviceColorMap.get(serviceName);
-
-    if (!baseColor) {
-      // Try predefined colors first
-      baseColor = serviceBaseColors[serviceName];
-
-      if (!baseColor) {
-        // Assign from default palette
-        baseColor = defaultColorPalette[nextColorIndex % defaultColorPalette.length];
-        nextColorIndex++;
-      }
-
-      serviceColorMap.set(serviceName, baseColor);
-    }
-
-    // Vary the lightness based on variation index (0 = darkest, higher = lighter)
-    const lightnessOffset = variationIndex * 25;
-    const r = Math.min(255, baseColor.r + lightnessOffset);
-    const g = Math.min(255, baseColor.g + lightnessOffset);
-    const b = Math.min(255, baseColor.b + lightnessOffset);
-
-    return {
-      bg: `rgba(${r}, ${g}, ${b}, 0.5)`,
-      border: `rgb(${r}, ${g}, ${b})`,
-    };
+  // Prepare dept+service API requests chart data (distinct colors)
+  const deptServiceRequestsChartData = {
+    labels: deptServiceRequestsData.map(d => (d.date as string).slice(5)),
+    datasets: deptServiceCombos.map((combo, index) => {
+      const color = extendedColors[index % extendedColors.length];
+      return {
+        label: combo,
+        data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
+        borderColor: color.border,
+        backgroundColor: color.bg,
+        borderWidth: 2,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      };
+    }),
   };
 
-  // Prepare dept+service API requests chart data (service-based colors)
-  const deptServiceRequestsChartData = (() => {
-    // Group combos by service to track variation index
-    const serviceVariationCount: { [service: string]: number } = {};
-
-    return {
-      labels: deptServiceRequestsData.map(d => (d.date as string).slice(5)),
-      datasets: deptServiceCombos.map((combo) => {
-        const [, serviceName] = combo.split('/');
-        const variationIndex = serviceVariationCount[serviceName] || 0;
-        serviceVariationCount[serviceName] = variationIndex + 1;
-        const color = getServiceColor(serviceName, variationIndex);
-
-        return {
-          label: combo,
-          data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
-          borderColor: color.border,
-          backgroundColor: color.bg,
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 2,
-          pointHoverRadius: 5,
-        };
-      }),
-    };
-  })();
-
-  // Prepare latency chart data (service-based colors)
+  // Prepare latency chart data (distinct colors)
   const latencyKeys = Object.keys(latencyHistory);
-  const latencyChartData = (() => {
-    const serviceVariationCount: { [service: string]: number } = {};
+  const latencyChartData = {
+    labels: latencyKeys.length > 0
+      ? latencyHistory[latencyKeys[0]]?.map(p => {
+          const time = new Date(p.time);
+          return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+        }) || []
+      : [],
+    datasets: latencyKeys.map((key, index) => {
+      const color = extendedColors[index % extendedColors.length];
+      return {
+        label: key,
+        data: latencyHistory[key]?.map(p => p.avgLatency) || [],
+        borderColor: color.border,
+        backgroundColor: color.bg,
+        borderWidth: 2,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      };
+    }),
+  };
 
-    return {
-      labels: latencyKeys.length > 0
-        ? latencyHistory[latencyKeys[0]]?.map(p => {
-            const time = new Date(p.time);
-            return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-          }) || []
-        : [],
-      datasets: latencyKeys.map((key) => {
-        // Key format is "serviceName/modelName"
-        const serviceName = key.split('/')[0];
-        const variationIndex = serviceVariationCount[serviceName] || 0;
-        serviceVariationCount[serviceName] = variationIndex + 1;
-        const color = getServiceColor(serviceName, variationIndex);
-
-        return {
-          label: key,
-          data: latencyHistory[key]?.map(p => p.avgLatency) || [],
-          borderColor: color.border,
-          backgroundColor: color.bg,
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 2,
-          pointHoverRadius: 5,
-        };
-      }),
-    };
-  })();
-
-  // Prepare rating chart data (service-based colors, forward-fill missing dates)
+  // Prepare rating chart data (distinct colors, forward-fill missing dates)
   const ratingDates = [...new Set(ratingDailyData.map(d => typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10)))].sort();
   // Create unique service/model combinations
   const ratingCombos = [...new Set(ratingDailyData.map(d => `${d.serviceName || 'unknown'}/${d.modelName}`))];
-  const ratingChartData = (() => {
-    const serviceVariationCount: { [service: string]: number } = {};
+  const ratingChartData = {
+    labels: ratingDates.map(d => d.slice(5)), // MM-DD format
+    datasets: ratingCombos.map((combo, index) => {
+      const [serviceName, modelName] = combo.split('/');
+      const color = extendedColors[index % extendedColors.length];
 
-    return {
-      labels: ratingDates.map(d => d.slice(5)), // MM-DD format
-      datasets: ratingCombos.map((combo) => {
-        const [serviceName, modelName] = combo.split('/');
-        const variationIndex = serviceVariationCount[serviceName] || 0;
-        serviceVariationCount[serviceName] = variationIndex + 1;
-        const color = getServiceColor(serviceName, variationIndex);
-
-        // Build data array with forward-fill for missing dates
-        let lastValue: number | null = null;
-        const data = ratingDates.map(date => {
-          const entry = ratingDailyData.find(d => {
-            const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
-            return entryDate === date && d.modelName === modelName && (d.serviceName || 'unknown') === serviceName;
-          });
-          if (entry) {
-            lastValue = entry.averageRating;
-            return entry.averageRating;
-          }
-          // Forward-fill: use last known value
-          return lastValue;
+      // Build data array with forward-fill for missing dates
+      let lastValue: number | null = null;
+      const data = ratingDates.map(date => {
+        const entry = ratingDailyData.find(d => {
+          const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
+          return entryDate === date && d.modelName === modelName && (d.serviceName || 'unknown') === serviceName;
         });
+        if (entry) {
+          lastValue = entry.averageRating;
+          return entry.averageRating;
+        }
+        // Forward-fill: use last known value
+        return lastValue;
+      });
 
-        return {
-          label: combo === 'unknown/' + modelName ? modelName : combo,
-          data,
-          borderColor: color.border,
-          backgroundColor: color.bg,
-          borderWidth: 2,
-          fill: false,
-          tension: 0.3,
-          pointRadius: 3,
-          pointHoverRadius: 6,
-          spanGaps: false, // Don't span gaps since we forward-fill
-        };
-      }),
-    };
-  })();
+      return {
+        label: combo === 'unknown/' + modelName ? modelName : combo,
+        data,
+        borderColor: color.border,
+        backgroundColor: color.bg,
+        borderWidth: 2,
+        fill: false,
+        tension: 0.3,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        spanGaps: false, // Don't span gaps since we forward-fill
+      };
+    }),
+  };
 
   if (loading) {
     return (
