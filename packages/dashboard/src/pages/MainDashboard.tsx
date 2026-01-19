@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Users, Activity, Zap, Building2, TrendingUp, Server, Plus, X, Clock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock } from 'lucide-react';
 import { statsApi, serviceApi } from '../services/api';
 
 type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
@@ -426,103 +427,86 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         </div>
       </div>
 
-      {/* Service Table */}
-      <div className="bg-white rounded-2xl shadow-card overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">서비스별 현황</h2>
-            <p className="text-sm text-gray-500 mt-0.5">{services.length}개 서비스 운영 중</p>
+      {/* Service Cards */}
+      <div className="bg-white rounded-2xl shadow-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">서비스별 현황</h2>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">{services.length}개 서비스</span>
+            {adminRole === 'SUPER_ADMIN' && (
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-samsung-blue text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                서비스 추가
+              </button>
+            )}
           </div>
-          {adminRole === 'SUPER_ADMIN' && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-samsung-blue text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              서비스 추가
-            </button>
-          )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">서비스</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">누적 사용자</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">일평균 활성</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">총 토큰</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">API 요청</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">상태</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {mergedServiceStats.map((service, index) => (
-                <tr
-                  key={service.serviceId}
-                  className={`hover:bg-blue-50/50 transition-colors cursor-pointer ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
-                  onClick={() => window.location.href = `/service/${service.serviceId}`}
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      {service.iconUrl ? (
-                        <img src={service.iconUrl} alt={service.serviceDisplayName} className="w-9 h-9 rounded-lg" />
-                      ) : (
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                          service.hasData ? 'bg-gradient-to-br from-samsung-blue to-blue-600' : 'bg-gray-300'
-                        }`}>
-                          <Server className="w-4 h-4 text-white" />
-                        </div>
-                      )}
-                      <div>
-                        <p className="font-semibold text-gray-900">{service.serviceDisplayName}</p>
-                        <p className="text-xs text-gray-500">{service.serviceName}</p>
-                      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {mergedServiceStats.map((service) => (
+            <Link
+              key={service.serviceId}
+              to={`/service/${service.serviceId}`}
+              className={`block p-4 border rounded-xl hover:border-samsung-blue/30 hover:shadow-md transition-all duration-200 group ${
+                service.hasData ? 'border-gray-100' : 'border-dashed border-gray-200 bg-gray-50/50'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  {service.iconUrl ? (
+                    <img src={service.iconUrl} alt={service.serviceDisplayName} className="w-10 h-10 rounded-lg" />
+                  ) : (
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      service.hasData ? 'bg-gradient-to-br from-samsung-blue to-blue-600' : 'bg-gray-300'
+                    }`}>
+                      <Server className="w-5 h-5 text-white" />
                     </div>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="font-semibold text-gray-900">{formatNumber(service.totalUsers)}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="font-semibold text-gray-900">{formatNumber(Math.round(service.avgDailyActiveUsers))}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="font-semibold text-gray-900">{formatNumber(service.totalTokens)}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="font-semibold text-gray-900">{formatNumber(service.totalRequests)}</span>
-                  </td>
-                  <td className="px-6 py-4 text-center">
-                    {service.hasData ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
-                        <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                        활성
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium bg-gray-100 text-gray-500 rounded-full">
-                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full"></span>
-                        대기
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {services.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
-                    등록된 서비스가 없습니다.
-                    {adminRole === 'SUPER_ADMIN' && (
-                      <button
-                        onClick={() => setShowCreateModal(true)}
-                        className="ml-2 text-samsung-blue hover:underline"
-                      >
-                        서비스 추가하기
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                  )}
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{service.serviceDisplayName}</h3>
+                    <p className="text-xs text-gray-500">{service.serviceName}</p>
+                  </div>
+                </div>
+                <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-samsung-blue transition-colors" />
+              </div>
+              {service.hasData ? (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2 bg-gray-50 rounded-lg">
+                    <p className="text-lg font-bold text-gray-900">{formatNumber(service.totalUsers)}</p>
+                    <p className="text-xs text-gray-500">사용자</p>
+                  </div>
+                  <div className="p-2 bg-gray-50 rounded-lg">
+                    <p className="text-lg font-bold text-gray-900">{formatNumber(Math.round(service.avgDailyActiveUsers))}</p>
+                    <p className="text-xs text-gray-500">일평균</p>
+                  </div>
+                  <div className="p-2 bg-gray-50 rounded-lg">
+                    <p className="text-lg font-bold text-gray-900">{formatNumber(service.totalTokens)}</p>
+                    <p className="text-xs text-gray-500">토큰</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-3 text-sm text-gray-400">
+                  <p>아직 요청이 없습니다</p>
+                  <p className="text-xs mt-1">LLM 모델을 등록하고 X-Service-Id 헤더로 요청하세요</p>
+                </div>
               )}
-            </tbody>
-          </table>
+            </Link>
+          ))}
+          {services.length === 0 && (
+            <div className="col-span-full text-center py-8 text-gray-500">
+              등록된 서비스가 없습니다.
+              {adminRole === 'SUPER_ADMIN' && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="ml-2 text-samsung-blue hover:underline"
+                >
+                  서비스 추가하기
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
