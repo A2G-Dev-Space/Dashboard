@@ -398,43 +398,76 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     }),
   };
 
-  // Prepare rating chart data (distinct colors, forward-fill missing dates)
+  // Prepare rating chart data (Line: cumulative average, Bar: daily average)
   const ratingDates = [...new Set(ratingDailyData.map(d => typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10)))].sort();
   // Create unique service/model combinations
   const ratingCombos = [...new Set(ratingDailyData.map(d => `${d.serviceName || 'unknown'}/${d.modelName}`))];
   const ratingChartData = {
     labels: ratingDates.map(d => d.slice(5)), // MM-DD format
-    datasets: ratingCombos.map((combo, index) => {
+    datasets: ratingCombos.flatMap((combo, index) => {
       const [serviceName, modelName] = combo.split('/');
       const color = extendedColors[index % extendedColors.length];
+      const label = combo === 'unknown/' + modelName ? modelName : combo;
 
-      // Build data array with forward-fill for missing dates
-      let lastValue: number | null = null;
-      const data = ratingDates.map(date => {
+      // Track cumulative sum and count for cumulative average
+      let cumulativeSum = 0;
+      let cumulativeCount = 0;
+      let lastCumulativeAvg: number | null = null;
+
+      // Build daily and cumulative data arrays
+      const dailyData: (number | null)[] = [];
+      const cumulativeData: (number | null)[] = [];
+
+      ratingDates.forEach(date => {
         const entry = ratingDailyData.find(d => {
           const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
           return entryDate === date && d.modelName === modelName && (d.serviceName || 'unknown') === serviceName;
         });
+
         if (entry) {
-          lastValue = entry.averageRating;
-          return entry.averageRating;
+          // Daily average for this date
+          dailyData.push(entry.averageRating);
+          // Update cumulative (weighted by count)
+          cumulativeSum += entry.averageRating * entry.ratingCount;
+          cumulativeCount += entry.ratingCount;
+          lastCumulativeAvg = cumulativeSum / cumulativeCount;
+          cumulativeData.push(lastCumulativeAvg);
+        } else {
+          // No data for this date
+          dailyData.push(null);
+          // Forward-fill cumulative average
+          cumulativeData.push(lastCumulativeAvg);
         }
-        // Forward-fill: use last known value
-        return lastValue;
       });
 
-      return {
-        label: combo === 'unknown/' + modelName ? modelName : combo,
-        data,
-        borderColor: color.border,
-        backgroundColor: color.bg,
-        borderWidth: 2,
-        fill: false,
-        tension: 0.3,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        spanGaps: false, // Don't span gaps since we forward-fill
-      };
+      return [
+        // Line: Cumulative average
+        {
+          type: 'line' as const,
+          label: `${label} (누적)`,
+          data: cumulativeData,
+          borderColor: color.border,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 2,
+          pointHoverRadius: 5,
+          yAxisID: 'y',
+          order: 1, // Draw lines on top
+        },
+        // Bar: Daily average
+        {
+          type: 'bar' as const,
+          label: `${label} (일별)`,
+          data: dailyData,
+          backgroundColor: color.bg,
+          borderColor: color.border,
+          borderWidth: 1,
+          yAxisID: 'y',
+          order: 2, // Draw bars behind
+        },
+      ];
     }),
   };
 
@@ -1156,10 +1189,11 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             ))}
           </div>
 
-          {/* Rating Line Chart */}
+          {/* Rating Mixed Chart (Line: cumulative, Bar: daily) */}
           {ratingDailyData.length > 0 && (
             <div className="h-72">
-              <Line
+              <Chart
+                type="bar"
                 data={ratingChartData}
                 options={{
                   responsive: true,
