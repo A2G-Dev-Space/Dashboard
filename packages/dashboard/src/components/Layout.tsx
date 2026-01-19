@@ -1,6 +1,6 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BookOpen, BarChart3, Home, Layers } from 'lucide-react';
+import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BarChart3, Home, Layers } from 'lucide-react';
 import { serviceApi } from '../services/api';
 
 interface User {
@@ -280,20 +280,6 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
             })}
           </div>
 
-          {/* 리소스 섹션 */}
-          <div>
-            <p className="px-4 mb-2 text-xs font-semibold text-pastel-500 uppercase tracking-wider">
-              리소스
-            </p>
-            <a
-              href="/docs/"
-              onClick={() => setSidebarOpen(false)}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all duration-200 group text-pastel-600 hover:bg-pastel-50 hover:text-pastel-700"
-            >
-              <BookOpen className="w-5 h-5 text-pastel-400 group-hover:text-pastel-600" />
-              <span className="font-medium">문서</span>
-            </a>
-          </div>
         </nav>
 
         {/* User info */}
