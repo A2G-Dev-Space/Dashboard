@@ -31,12 +31,27 @@ ratingRoutes.post('/', async (req, res) => {
       return;
     }
 
+    // serviceId가 제공된 경우 UUID 또는 서비스명으로 조회
+    let resolvedServiceId: string | null = null;
+    if (serviceId) {
+      const service = await prisma.service.findFirst({
+        where: {
+          OR: [
+            { id: serviceId },
+            { name: serviceId },
+          ],
+        },
+        select: { id: true },
+      });
+      resolvedServiceId = service?.id || null;
+    }
+
     // 평점 저장 (serviceId 포함)
     const feedback = await prisma.ratingFeedback.create({
       data: {
         modelName,
         rating: Math.round(rating),  // 정수로 저장
-        serviceId: serviceId || null,
+        serviceId: resolvedServiceId,
       },
     });
 
@@ -57,13 +72,28 @@ ratingRoutes.post('/', async (req, res) => {
 ratingRoutes.get('/stats', async (req, res) => {
   try {
     const days = parseInt(req.query['days'] as string) || 30;
-    const serviceId = req.query['serviceId'] as string | undefined;
+    const serviceIdParam = req.query['serviceId'] as string | undefined;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
+    // serviceId가 제공된 경우 UUID 또는 서비스명으로 조회
+    let resolvedServiceId: string | null = null;
+    if (serviceIdParam) {
+      const service = await prisma.service.findFirst({
+        where: {
+          OR: [
+            { id: serviceIdParam },
+            { name: serviceIdParam },
+          ],
+        },
+        select: { id: true },
+      });
+      resolvedServiceId = service?.id || null;
+    }
+
     // 날짜별/모델별/서비스별 평균 점수 (parameterized query to prevent SQL injection)
-    const dailyStats = serviceId
+    const dailyStats = resolvedServiceId
       ? await prisma.$queryRaw<Array<{
           date: Date;
           modelName: string;
@@ -79,7 +109,7 @@ ratingRoutes.get('/stats', async (req, res) => {
             COUNT(*)::bigint as "ratingCount"
           FROM rating_feedbacks r
           LEFT JOIN services s ON r.service_id = s.id
-          WHERE r.timestamp >= ${startDate} AND r.service_id = ${serviceId}::uuid
+          WHERE r.timestamp >= ${startDate} AND r.service_id = ${resolvedServiceId}::uuid
           GROUP BY DATE(r.timestamp), r.model_name, s.name
           ORDER BY DATE(r.timestamp) ASC, r.model_name ASC
         `
@@ -104,7 +134,7 @@ ratingRoutes.get('/stats', async (req, res) => {
         `;
 
     // 모델별/서비스별 전체 평균
-    const modelStats = serviceId
+    const modelStats = resolvedServiceId
       ? await prisma.$queryRaw<Array<{
           modelName: string;
           serviceName: string | null;
@@ -118,7 +148,7 @@ ratingRoutes.get('/stats', async (req, res) => {
             COUNT(*)::bigint as "totalRatings"
           FROM rating_feedbacks r
           LEFT JOIN services s ON r.service_id = s.id
-          WHERE r.timestamp >= ${startDate} AND r.service_id = ${serviceId}::uuid
+          WHERE r.timestamp >= ${startDate} AND r.service_id = ${resolvedServiceId}::uuid
           GROUP BY r.model_name, s.name
           ORDER BY "averageRating" DESC
         `
