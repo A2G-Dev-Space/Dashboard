@@ -56,7 +56,7 @@ echo -e "\n${YELLOW}Step 4: Update ratings to nexus-coder...${NC}"
 run_psql -c "UPDATE rating_feedbacks SET service_id = '$SERVICE_ID'::uuid WHERE service_id IS NULL;"
 
 echo -e "\n${YELLOW}Step 5: Verification...${NC}"
-UPDATED_COUNT=$(run_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks WHERE service_id = '$SERVICE_ID'::uuid;")
+UPDATED_COUNT=$(run_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks WHERE service_id = '$SERVICE_ID';")
 STILL_NULL=$(run_psql -t -A -c "SELECT COUNT(*) FROM rating_feedbacks WHERE service_id IS NULL;")
 echo -e "  Ratings with nexus-coder: $UPDATED_COUNT"
 echo -e "  Ratings still without service_id: $STILL_NULL"

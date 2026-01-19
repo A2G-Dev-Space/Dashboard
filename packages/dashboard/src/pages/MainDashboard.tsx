@@ -128,12 +128,14 @@ interface LatencyHistory {
 interface RatingDailyData {
   date: string;
   modelName: string;
+  serviceName: string | null;
   averageRating: number;
   ratingCount: number;
 }
 
 interface RatingByModel {
   modelName: string;
+  serviceName: string | null;
   averageRating: number | null;
   totalRatings: number;
 }
@@ -383,20 +385,6 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     };
   };
 
-  // Extended colors for generic usage (models, latency, etc.)
-  const extendedColors = [
-    { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgb(59, 130, 246)' },
-    { bg: 'rgba(16, 185, 129, 0.5)', border: 'rgb(16, 185, 129)' },
-    { bg: 'rgba(245, 158, 11, 0.5)', border: 'rgb(245, 158, 11)' },
-    { bg: 'rgba(139, 92, 246, 0.5)', border: 'rgb(139, 92, 246)' },
-    { bg: 'rgba(236, 72, 153, 0.5)', border: 'rgb(236, 72, 153)' },
-    { bg: 'rgba(6, 182, 212, 0.5)', border: 'rgb(6, 182, 212)' },
-    { bg: 'rgba(234, 88, 12, 0.5)', border: 'rgb(234, 88, 12)' },
-    { bg: 'rgba(99, 102, 241, 0.5)', border: 'rgb(99, 102, 241)' },
-    { bg: 'rgba(20, 184, 166, 0.5)', border: 'rgb(20, 184, 166)' },
-    { bg: 'rgba(244, 63, 94, 0.5)', border: 'rgb(244, 63, 94)' },
-  ];
-
   // Prepare dept+service API requests chart data (service-based colors)
   const deptServiceRequestsChartData = (() => {
     // Group combos by service to track variation index
@@ -459,30 +447,51 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     };
   })();
 
-  // Prepare rating chart data
+  // Prepare rating chart data (service-based colors, forward-fill missing dates)
   const ratingDates = [...new Set(ratingDailyData.map(d => typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10)))].sort();
-  const ratingModels = [...new Set(ratingDailyData.map(d => d.modelName))];
-  const ratingChartData = {
-    labels: ratingDates.map(d => d.slice(5)), // MM-DD format
-    datasets: ratingModels.map((modelName, index) => ({
-      label: modelName,
-      data: ratingDates.map(date => {
-        const entry = ratingDailyData.find(d => {
-          const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
-          return entryDate === date && d.modelName === modelName;
+  // Create unique service/model combinations
+  const ratingCombos = [...new Set(ratingDailyData.map(d => `${d.serviceName || 'unknown'}/${d.modelName}`))];
+  const ratingChartData = (() => {
+    const serviceVariationCount: { [service: string]: number } = {};
+
+    return {
+      labels: ratingDates.map(d => d.slice(5)), // MM-DD format
+      datasets: ratingCombos.map((combo) => {
+        const [serviceName, modelName] = combo.split('/');
+        const variationIndex = serviceVariationCount[serviceName] || 0;
+        serviceVariationCount[serviceName] = variationIndex + 1;
+        const color = getServiceColor(serviceName, variationIndex);
+
+        // Build data array with forward-fill for missing dates
+        let lastValue: number | null = null;
+        const data = ratingDates.map(date => {
+          const entry = ratingDailyData.find(d => {
+            const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
+            return entryDate === date && d.modelName === modelName && (d.serviceName || 'unknown') === serviceName;
+          });
+          if (entry) {
+            lastValue = entry.averageRating;
+            return entry.averageRating;
+          }
+          // Forward-fill: use last known value
+          return lastValue;
         });
-        return entry?.averageRating || null;
+
+        return {
+          label: combo === 'unknown/' + modelName ? modelName : combo,
+          data,
+          borderColor: color.border,
+          backgroundColor: color.bg,
+          borderWidth: 2,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 6,
+          spanGaps: false, // Don't span gaps since we forward-fill
+        };
       }),
-      borderColor: extendedColors[index % extendedColors.length].border,
-      backgroundColor: extendedColors[index % extendedColors.length].bg,
-      borderWidth: 2,
-      fill: false,
-      tension: 0.3,
-      pointRadius: 3,
-      pointHoverRadius: 6,
-      spanGaps: true,
-    })),
-  };
+    };
+  })();
 
   if (loading) {
     return (
@@ -1183,8 +1192,11 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
           {/* Model Rating Summary Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
-            {ratingByModel.slice(0, 6).map((model) => (
-              <div key={model.modelName} className="p-3 bg-gray-50 rounded-lg text-center">
+            {ratingByModel.slice(0, 6).map((model, idx) => (
+              <div key={`${model.serviceName}-${model.modelName}-${idx}`} className="p-3 bg-gray-50 rounded-lg text-center">
+                {model.serviceName && (
+                  <p className="text-[10px] text-gray-400 truncate mb-0.5">{model.serviceName}</p>
+                )}
                 <p className="text-xs text-gray-500 truncate mb-1" title={model.modelName}>
                   {model.modelName.length > 15 ? model.modelName.slice(0, 15) + '...' : model.modelName}
                 </p>
@@ -1254,6 +1266,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-2 font-semibold text-gray-700">서비스</th>
                     <th className="text-left py-3 px-2 font-semibold text-gray-700">모델</th>
                     <th className="text-right py-3 px-2 font-semibold text-gray-700">평균 평점</th>
                     <th className="text-right py-3 px-2 font-semibold text-gray-700">평가 수</th>
@@ -1261,7 +1274,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                 </thead>
                 <tbody>
                   {ratingByModel.map((model, index) => (
-                    <tr key={model.modelName} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                    <tr key={`${model.serviceName}-${model.modelName}-${index}`} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                      <td className="py-3 px-2 text-gray-600">{model.serviceName || '-'}</td>
                       <td className="py-3 px-2 font-medium text-gray-900">{model.modelName}</td>
                       <td className="text-right py-3 px-2 text-gray-700">
                         <div className="flex items-center justify-end gap-1">

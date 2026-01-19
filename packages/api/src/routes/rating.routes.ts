@@ -62,67 +62,97 @@ ratingRoutes.get('/stats', async (req, res) => {
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // 날짜별/모델별 평균 점수 (parameterized query to prevent SQL injection)
+    // 날짜별/모델별/서비스별 평균 점수 (parameterized query to prevent SQL injection)
     const dailyStats = serviceId
       ? await prisma.$queryRaw<Array<{
           date: Date;
           modelName: string;
+          serviceName: string | null;
           averageRating: number;
           ratingCount: bigint;
         }>>`
           SELECT
-            DATE(timestamp) as date,
-            model_name as "modelName",
-            AVG(rating)::float as "averageRating",
+            DATE(r.timestamp) as date,
+            r.model_name as "modelName",
+            s.name as "serviceName",
+            AVG(r.rating)::float as "averageRating",
             COUNT(*)::bigint as "ratingCount"
-          FROM rating_feedbacks
-          WHERE timestamp >= ${startDate} AND service_id = ${serviceId}::uuid
-          GROUP BY DATE(timestamp), model_name
-          ORDER BY DATE(timestamp) ASC, model_name ASC
+          FROM rating_feedbacks r
+          LEFT JOIN services s ON r.service_id = s.id
+          WHERE r.timestamp >= ${startDate} AND r.service_id = ${serviceId}::uuid
+          GROUP BY DATE(r.timestamp), r.model_name, s.name
+          ORDER BY DATE(r.timestamp) ASC, r.model_name ASC
         `
       : await prisma.$queryRaw<Array<{
           date: Date;
           modelName: string;
+          serviceName: string | null;
           averageRating: number;
           ratingCount: bigint;
         }>>`
           SELECT
-            DATE(timestamp) as date,
-            model_name as "modelName",
-            AVG(rating)::float as "averageRating",
+            DATE(r.timestamp) as date,
+            r.model_name as "modelName",
+            s.name as "serviceName",
+            AVG(r.rating)::float as "averageRating",
             COUNT(*)::bigint as "ratingCount"
-          FROM rating_feedbacks
-          WHERE timestamp >= ${startDate}
-          GROUP BY DATE(timestamp), model_name
-          ORDER BY DATE(timestamp) ASC, model_name ASC
+          FROM rating_feedbacks r
+          LEFT JOIN services s ON r.service_id = s.id
+          WHERE r.timestamp >= ${startDate}
+          GROUP BY DATE(r.timestamp), r.model_name, s.name
+          ORDER BY DATE(r.timestamp) ASC, r.model_name ASC
         `;
 
-    // 모델별 전체 평균
-    const whereClause: { timestamp: { gte: Date }; serviceId?: string } = {
-      timestamp: { gte: startDate },
-    };
-    if (serviceId) {
-      whereClause.serviceId = serviceId;
-    }
-
-    const modelStats = await prisma.ratingFeedback.groupBy({
-      by: ['modelName'],
-      _avg: { rating: true },
-      _count: { rating: true },
-      where: whereClause,
-    });
+    // 모델별/서비스별 전체 평균
+    const modelStats = serviceId
+      ? await prisma.$queryRaw<Array<{
+          modelName: string;
+          serviceName: string | null;
+          averageRating: number;
+          totalRatings: bigint;
+        }>>`
+          SELECT
+            r.model_name as "modelName",
+            s.name as "serviceName",
+            AVG(r.rating)::float as "averageRating",
+            COUNT(*)::bigint as "totalRatings"
+          FROM rating_feedbacks r
+          LEFT JOIN services s ON r.service_id = s.id
+          WHERE r.timestamp >= ${startDate} AND r.service_id = ${serviceId}::uuid
+          GROUP BY r.model_name, s.name
+          ORDER BY "averageRating" DESC
+        `
+      : await prisma.$queryRaw<Array<{
+          modelName: string;
+          serviceName: string | null;
+          averageRating: number;
+          totalRatings: bigint;
+        }>>`
+          SELECT
+            r.model_name as "modelName",
+            s.name as "serviceName",
+            AVG(r.rating)::float as "averageRating",
+            COUNT(*)::bigint as "totalRatings"
+          FROM rating_feedbacks r
+          LEFT JOIN services s ON r.service_id = s.id
+          WHERE r.timestamp >= ${startDate}
+          GROUP BY r.model_name, s.name
+          ORDER BY "averageRating" DESC
+        `;
 
     res.json({
       daily: dailyStats.map(row => ({
         date: row.date,
         modelName: row.modelName,
+        serviceName: row.serviceName,
         averageRating: row.averageRating,
         ratingCount: Number(row.ratingCount),
       })),
       byModel: modelStats.map(m => ({
         modelName: m.modelName,
-        averageRating: m._avg.rating,
-        totalRatings: m._count.rating,
+        serviceName: m.serviceName,
+        averageRating: m.averageRating,
+        totalRatings: Number(m.totalRatings),
       })),
     });
   } catch (error) {
