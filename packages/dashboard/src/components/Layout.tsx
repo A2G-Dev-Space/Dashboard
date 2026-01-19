@@ -64,6 +64,20 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
     }
   }, [isAdmin]);
 
+  // Listen for service updates from other components
+  useEffect(() => {
+    const handleServiceUpdate = () => {
+      if (isAdmin) {
+        loadServices();
+      }
+    };
+
+    window.addEventListener('services-updated', handleServiceUpdate);
+    return () => {
+      window.removeEventListener('services-updated', handleServiceUpdate);
+    };
+  }, [isAdmin]);
+
   // Auto-expand current service
   useEffect(() => {
     if (serviceId) {

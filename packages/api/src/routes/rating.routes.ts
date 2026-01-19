@@ -18,7 +18,7 @@ export const ratingRoutes = Router();
  */
 ratingRoutes.post('/', async (req, res) => {
   try {
-    const { modelName, rating } = req.body;
+    const { modelName, rating, serviceId } = req.body;
 
     // 유효성 검사
     if (!modelName || typeof modelName !== 'string') {
@@ -31,11 +31,12 @@ ratingRoutes.post('/', async (req, res) => {
       return;
     }
 
-    // 평점 저장
+    // 평점 저장 (serviceId 포함)
     const feedback = await prisma.ratingFeedback.create({
       data: {
         modelName,
         rating: Math.round(rating),  // 정수로 저장
+        serviceId: serviceId || null,
       },
     });
 
@@ -51,38 +52,64 @@ ratingRoutes.post('/', async (req, res) => {
  * 모델별 평점 통계 조회
  * - daily: 날짜별/모델별 평균 점수
  * - byModel: 모델별 전체 평균
+ * Query: ?days=30&serviceId=xxx (optional)
  */
 ratingRoutes.get('/stats', async (req, res) => {
   try {
     const days = parseInt(req.query['days'] as string) || 30;
+    const serviceId = req.query['serviceId'] as string | undefined;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // 날짜별/모델별 평균 점수
-    const dailyStats = await prisma.$queryRaw<Array<{
-      date: Date;
-      modelName: string;
-      averageRating: number;
-      ratingCount: bigint;
-    }>>`
-      SELECT
-        DATE(timestamp) as date,
-        model_name as "modelName",
-        AVG(rating)::float as "averageRating",
-        COUNT(*)::bigint as "ratingCount"
-      FROM rating_feedbacks
-      WHERE timestamp >= ${startDate}
-      GROUP BY DATE(timestamp), model_name
-      ORDER BY DATE(timestamp) ASC, model_name ASC
-    `;
+    // 날짜별/모델별 평균 점수 (parameterized query to prevent SQL injection)
+    const dailyStats = serviceId
+      ? await prisma.$queryRaw<Array<{
+          date: Date;
+          modelName: string;
+          averageRating: number;
+          ratingCount: bigint;
+        }>>`
+          SELECT
+            DATE(timestamp) as date,
+            model_name as "modelName",
+            AVG(rating)::float as "averageRating",
+            COUNT(*)::bigint as "ratingCount"
+          FROM rating_feedbacks
+          WHERE timestamp >= ${startDate} AND service_id = ${serviceId}::uuid
+          GROUP BY DATE(timestamp), model_name
+          ORDER BY DATE(timestamp) ASC, model_name ASC
+        `
+      : await prisma.$queryRaw<Array<{
+          date: Date;
+          modelName: string;
+          averageRating: number;
+          ratingCount: bigint;
+        }>>`
+          SELECT
+            DATE(timestamp) as date,
+            model_name as "modelName",
+            AVG(rating)::float as "averageRating",
+            COUNT(*)::bigint as "ratingCount"
+          FROM rating_feedbacks
+          WHERE timestamp >= ${startDate}
+          GROUP BY DATE(timestamp), model_name
+          ORDER BY DATE(timestamp) ASC, model_name ASC
+        `;
 
     // 모델별 전체 평균
+    const whereClause: { timestamp: { gte: Date }; serviceId?: string } = {
+      timestamp: { gte: startDate },
+    };
+    if (serviceId) {
+      whereClause.serviceId = serviceId;
+    }
+
     const modelStats = await prisma.ratingFeedback.groupBy({
       by: ['modelName'],
       _avg: { rating: true },
       _count: { rating: true },
-      where: { timestamp: { gte: startDate } },
+      where: whereClause,
     });
 
     res.json({

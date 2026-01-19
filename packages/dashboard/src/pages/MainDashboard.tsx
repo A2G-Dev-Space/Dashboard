@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock } from 'lucide-react';
-import { statsApi, serviceApi } from '../services/api';
+import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock, Star } from 'lucide-react';
+import { statsApi, serviceApi, ratingApi } from '../services/api';
 
 type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
@@ -125,6 +125,19 @@ interface LatencyHistory {
   [key: string]: LatencyHistoryPoint[];
 }
 
+interface RatingDailyData {
+  date: string;
+  modelName: string;
+  averageRating: number;
+  ratingCount: number;
+}
+
+interface RatingByModel {
+  modelName: string;
+  averageRating: number | null;
+  totalRatings: number;
+}
+
 export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [services, setServices] = useState<Service[]>([]);
   const [globalOverview, setGlobalOverview] = useState<GlobalOverviewService[]>([]);
@@ -139,6 +152,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   const [deptServiceCombos, setDeptServiceCombos] = useState<string[]>([]);
   const [latencyStats, setLatencyStats] = useState<LatencyStat[]>([]);
   const [latencyHistory, setLatencyHistory] = useState<LatencyHistory>({});
+  const [ratingDailyData, setRatingDailyData] = useState<RatingDailyData[]>([]);
+  const [ratingByModel, setRatingByModel] = useState<RatingByModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -154,7 +169,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
   const loadData = async () => {
     try {
-      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes, deptUsersDailyRes, deptServiceReqsRes, latencyRes, latencyHistoryRes] = await Promise.all([
+      const [servicesRes, globalRes, serviceDailyRes, deptRes, deptDailyRes, deptUsersDailyRes, deptServiceReqsRes, latencyRes, latencyHistoryRes, ratingRes] = await Promise.all([
         serviceApi.list(),
         statsApi.globalOverview(),
         statsApi.globalByService(30),
@@ -164,6 +179,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         statsApi.globalByDeptServiceRequestsDaily(30, 10),
         statsApi.latency(),
         statsApi.latencyHistory(24, 10),
+        ratingApi.stats(30),
       ]);
 
       setServices(servicesRes.data.services || []);
@@ -179,6 +195,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       setDeptServiceCombos(deptServiceReqsRes.data.combinations || []);
       setLatencyStats(latencyRes.data.stats || []);
       setLatencyHistory(latencyHistoryRes.data.history || {});
+      setRatingDailyData(ratingRes.data.daily || []);
+      setRatingByModel(ratingRes.data.byModel || []);
     } catch (error) {
       console.error('Failed to load main dashboard data:', error);
     } finally {
@@ -201,6 +219,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       setShowCreateModal(false);
       setNewService({ name: '', displayName: '', description: '' });
       loadData();
+      // Notify sidebar to refresh services
+      window.dispatchEvent(new CustomEvent('services-updated'));
     } catch (error) {
       console.error('Failed to create service:', error);
       alert('서비스 생성에 실패했습니다. 이미 존재하는 이름인지 확인해주세요.');
@@ -313,7 +333,57 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     ]),
   };
 
-  // Extended colors for dept+service combinations (10 items)
+  // Service-based color scheme: same service uses same color family
+  const serviceBaseColors: { [key: string]: { r: number; g: number; b: number } } = {
+    'nexus-coder': { r: 59, g: 130, b: 246 },    // Blue
+  };
+
+  // Default color palette for unknown services
+  const defaultColorPalette = [
+    { r: 16, g: 185, b: 129 },   // Emerald
+    { r: 139, g: 92, b: 246 },   // Violet
+    { r: 245, g: 158, b: 11 },   // Amber
+    { r: 236, g: 72, b: 153 },   // Pink
+    { r: 6, g: 182, b: 212 },    // Cyan
+    { r: 234, g: 88, b: 12 },    // Orange
+    { r: 99, g: 102, b: 241 },   // Indigo
+  ];
+
+  // Track assigned colors for consistency
+  const serviceColorMap = new Map<string, { r: number; g: number; b: number }>();
+  let nextColorIndex = 0;
+
+  // Get unique services from combos and assign colors
+  const getServiceColor = (serviceName: string, variationIndex: number) => {
+    // Check if we already assigned a color to this service
+    let baseColor = serviceColorMap.get(serviceName);
+
+    if (!baseColor) {
+      // Try predefined colors first
+      baseColor = serviceBaseColors[serviceName];
+
+      if (!baseColor) {
+        // Assign from default palette
+        baseColor = defaultColorPalette[nextColorIndex % defaultColorPalette.length];
+        nextColorIndex++;
+      }
+
+      serviceColorMap.set(serviceName, baseColor);
+    }
+
+    // Vary the lightness based on variation index (0 = darkest, higher = lighter)
+    const lightnessOffset = variationIndex * 25;
+    const r = Math.min(255, baseColor.r + lightnessOffset);
+    const g = Math.min(255, baseColor.g + lightnessOffset);
+    const b = Math.min(255, baseColor.b + lightnessOffset);
+
+    return {
+      bg: `rgba(${r}, ${g}, ${b}, 0.5)`,
+      border: `rgb(${r}, ${g}, ${b})`,
+    };
+  };
+
+  // Extended colors for generic usage (models, latency, etc.)
   const extendedColors = [
     { bg: 'rgba(59, 130, 246, 0.5)', border: 'rgb(59, 130, 246)' },
     { bg: 'rgba(16, 185, 129, 0.5)', border: 'rgb(16, 185, 129)' },
@@ -327,41 +397,90 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     { bg: 'rgba(244, 63, 94, 0.5)', border: 'rgb(244, 63, 94)' },
   ];
 
-  // Prepare dept+service API requests chart data
-  const deptServiceRequestsChartData = {
-    labels: deptServiceRequestsData.map(d => (d.date as string).slice(5)),
-    datasets: deptServiceCombos.map((combo, index) => ({
-      label: combo,
-      data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
-      borderColor: extendedColors[index % extendedColors.length].border,
-      backgroundColor: extendedColors[index % extendedColors.length].bg,
-      borderWidth: 2,
-      fill: false,
-      tension: 0.3,
-      pointRadius: 2,
-      pointHoverRadius: 5,
-    })),
-  };
+  // Prepare dept+service API requests chart data (service-based colors)
+  const deptServiceRequestsChartData = (() => {
+    // Group combos by service to track variation index
+    const serviceVariationCount: { [service: string]: number } = {};
 
-  // Prepare latency chart data
+    return {
+      labels: deptServiceRequestsData.map(d => (d.date as string).slice(5)),
+      datasets: deptServiceCombos.map((combo) => {
+        const [, serviceName] = combo.split('/');
+        const variationIndex = serviceVariationCount[serviceName] || 0;
+        serviceVariationCount[serviceName] = variationIndex + 1;
+        const color = getServiceColor(serviceName, variationIndex);
+
+        return {
+          label: combo,
+          data: deptServiceRequestsData.map(d => (d[combo] as number) || 0),
+          borderColor: color.border,
+          backgroundColor: color.bg,
+          borderWidth: 2,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 2,
+          pointHoverRadius: 5,
+        };
+      }),
+    };
+  })();
+
+  // Prepare latency chart data (service-based colors)
   const latencyKeys = Object.keys(latencyHistory);
-  const latencyChartData = {
-    labels: latencyKeys.length > 0
-      ? latencyHistory[latencyKeys[0]]?.map(p => {
-          const time = new Date(p.time);
-          return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
-        }) || []
-      : [],
-    datasets: latencyKeys.map((key, index) => ({
-      label: key,
-      data: latencyHistory[key]?.map(p => p.avgLatency) || [],
+  const latencyChartData = (() => {
+    const serviceVariationCount: { [service: string]: number } = {};
+
+    return {
+      labels: latencyKeys.length > 0
+        ? latencyHistory[latencyKeys[0]]?.map(p => {
+            const time = new Date(p.time);
+            return `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+          }) || []
+        : [],
+      datasets: latencyKeys.map((key) => {
+        // Key format is "serviceName/modelName"
+        const serviceName = key.split('/')[0];
+        const variationIndex = serviceVariationCount[serviceName] || 0;
+        serviceVariationCount[serviceName] = variationIndex + 1;
+        const color = getServiceColor(serviceName, variationIndex);
+
+        return {
+          label: key,
+          data: latencyHistory[key]?.map(p => p.avgLatency) || [],
+          borderColor: color.border,
+          backgroundColor: color.bg,
+          borderWidth: 2,
+          fill: false,
+          tension: 0.3,
+          pointRadius: 2,
+          pointHoverRadius: 5,
+        };
+      }),
+    };
+  })();
+
+  // Prepare rating chart data
+  const ratingDates = [...new Set(ratingDailyData.map(d => typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10)))].sort();
+  const ratingModels = [...new Set(ratingDailyData.map(d => d.modelName))];
+  const ratingChartData = {
+    labels: ratingDates.map(d => d.slice(5)), // MM-DD format
+    datasets: ratingModels.map((modelName, index) => ({
+      label: modelName,
+      data: ratingDates.map(date => {
+        const entry = ratingDailyData.find(d => {
+          const entryDate = typeof d.date === 'string' ? d.date.slice(0, 10) : new Date(d.date).toISOString().slice(0, 10);
+          return entryDate === date && d.modelName === modelName;
+        });
+        return entry?.averageRating || null;
+      }),
       borderColor: extendedColors[index % extendedColors.length].border,
       backgroundColor: extendedColors[index % extendedColors.length].bg,
       borderWidth: 2,
       fill: false,
       tension: 0.3,
-      pointRadius: 2,
-      pointHoverRadius: 5,
+      pointRadius: 3,
+      pointHoverRadius: 6,
+      spanGaps: true,
     })),
   };
 
@@ -1044,6 +1163,113 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                         {stat.count24h > 0 && <span className="text-xs text-gray-400 ml-1">({stat.count24h})</span>}
                       </td>
                       <td className="text-right py-3 px-2 text-gray-700">{formatNumber(stat.count24h)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Model Ratings Chart */}
+      {(ratingByModel.length > 0 || ratingDailyData.length > 0) && (
+        <div className="bg-white rounded-2xl shadow-card p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Star className="w-5 h-5 text-yellow-500" />
+            <h2 className="text-lg font-semibold text-gray-900">모델 평점</h2>
+            <span className="text-xs text-gray-500">(최근 30일)</span>
+          </div>
+
+          {/* Model Rating Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6">
+            {ratingByModel.slice(0, 6).map((model) => (
+              <div key={model.modelName} className="p-3 bg-gray-50 rounded-lg text-center">
+                <p className="text-xs text-gray-500 truncate mb-1" title={model.modelName}>
+                  {model.modelName.length > 15 ? model.modelName.slice(0, 15) + '...' : model.modelName}
+                </p>
+                <div className="flex items-center justify-center gap-1">
+                  <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                  <span className="text-lg font-bold text-gray-900">
+                    {model.averageRating ? model.averageRating.toFixed(1) : '-'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">{model.totalRatings}개 평가</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Rating Line Chart */}
+          {ratingDailyData.length > 0 && (
+            <div className="h-72">
+              <Line
+                data={ratingChartData}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  interaction: {
+                    mode: 'index',
+                    intersect: false,
+                  },
+                  plugins: {
+                    legend: {
+                      position: 'top',
+                      labels: {
+                        usePointStyle: true,
+                        padding: 10,
+                      },
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: (context) => {
+                          const value = context.parsed.y;
+                          if (value === null) return `${context.dataset.label}: 데이터 없음`;
+                          return `${context.dataset.label}: ${value.toFixed(2)}점`;
+                        },
+                      },
+                    },
+                  },
+                  scales: {
+                    y: {
+                      min: 1,
+                      max: 5,
+                      beginAtZero: false,
+                      title: {
+                        display: true,
+                        text: '평균 평점',
+                      },
+                      ticks: {
+                        stepSize: 1,
+                      },
+                    },
+                  },
+                }}
+              />
+            </div>
+          )}
+
+          {/* Rating Table */}
+          {ratingByModel.length > 0 && (
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-2 font-semibold text-gray-700">모델</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">평균 평점</th>
+                    <th className="text-right py-3 px-2 font-semibold text-gray-700">평가 수</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ratingByModel.map((model, index) => (
+                    <tr key={model.modelName} className={index % 2 === 0 ? 'bg-gray-50/50' : ''}>
+                      <td className="py-3 px-2 font-medium text-gray-900">{model.modelName}</td>
+                      <td className="text-right py-3 px-2 text-gray-700">
+                        <div className="flex items-center justify-end gap-1">
+                          <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                          {model.averageRating ? model.averageRating.toFixed(2) : '-'}
+                        </div>
+                      </td>
+                      <td className="text-right py-3 px-2 text-gray-700">{formatNumber(model.totalRatings)}</td>
                     </tr>
                   ))}
                 </tbody>
