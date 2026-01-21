@@ -135,25 +135,6 @@ rm -rf ~/nexus-download
 Update complete! Run: source ~/.bashrc && nexus
 ```
 
-## 개발자용 설치 (npm)
-
-Node.js 환경에서 직접 개발하려는 경우:
-
-```bash
-# 저장소 클론
-git clone https://github.samsungds.net/syngha-han/nexus-coder.git
-cd nexus-coder
-
-# 설치 및 빌드
-npm install && npm run build
-
-# 전역 링크
-npm link
-
-# 실행
-nexus
-```
-
 ## 첫 실행
 
 ```bash
