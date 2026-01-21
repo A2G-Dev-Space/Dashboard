@@ -37,7 +37,7 @@ features:
   - icon: 🔒
     title: Air-Gapped Ready
     details: 폐쇄망 환경에서 완벽하게 동작하도록 설계되었습니다.
-    link: /guide/installation
+    link: /guide/getting-started
     linkText: 설치 방법
   - icon: ⚡
     title: Context Management
@@ -64,4 +64,4 @@ gunzip nexus.gz && chmod +x nexus
 source ~/.bashrc && nexus
 ```
 
-자세한 설치 방법은 [Installation](/guide/installation)을 참조하세요.
+자세한 설치 방법은 [Getting Started](/guide/getting-started)를 참조하세요.
