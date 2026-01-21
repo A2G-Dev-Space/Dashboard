@@ -37,7 +37,7 @@ features:
   - icon: 🔒
     title: Air-Gapped Ready
     details: 폐쇄망 환경에서 완벽하게 동작하도록 설계되었습니다.
-    link: /guide/installation
+    link: /guide/getting-started
     linkText: 설치 방법
   - icon: ⚡
     title: Context Management
@@ -48,9 +48,19 @@ features:
 
 ## 빠른 시작
 
+::: warning 필수 환경
+- **Linux 또는 WSL 환경에서만 동작합니다** (PowerShell/VWP 미지원)
+- NO_PROXY 설정 필수: `export NO_PROXY="10.229.95.228,10.229.95.220,a2g.samsungds.net,genai.samsungds.net,$NO_PROXY"`
+:::
+
 Node.js 설치 없이 바이너리로 바로 실행:
 
 ```bash
+# 0. NO_PROXY 설정 (필수)
+echo 'export NO_PROXY="10.229.95.228,10.229.95.220,a2g.samsungds.net,genai.samsungds.net,$NO_PROXY"' >> ~/.bashrc
+echo 'export no_proxy="10.229.95.228,10.229.95.220,a2g.samsungds.net,genai.samsungds.net,$no_proxy"' >> ~/.bashrc
+source ~/.bashrc
+
 # 1. 다운로드
 mkdir -p ~/nexus-download && cd ~/nexus-download
 wget https://github.samsungds.net/syngha-han/nexus-coder/raw/main/nexus.gz --no-check-certificate
@@ -64,4 +74,4 @@ gunzip nexus.gz && chmod +x nexus
 source ~/.bashrc && nexus
 ```
 
-자세한 설치 방법은 [Installation](/guide/installation)을 참조하세요.
+자세한 설치 방법은 [Getting Started](/guide/getting-started)를 참조하세요.
