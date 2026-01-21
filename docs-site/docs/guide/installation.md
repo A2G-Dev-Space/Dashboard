@@ -6,10 +6,6 @@
 Linux 또는 WSL(Windows Subsystem for Linux) 환경에서 사용해주세요.
 :::
 
-## Quick Start (바이너리 설치)
-
-**Node.js, npm 설치 불필요** - 바이너리만 다운로드하여 바로 사용
-
 ::: danger 필수: NO_PROXY 설정
 Nexus Coder가 정상적으로 동작하려면 다음 주소들에 대한 **NO_PROXY 설정이 반드시 필요**합니다:
 
@@ -31,6 +27,10 @@ source ~/.bashrc   # 또는 source ~/.zshrc
 
 이 설정이 없으면 API 호출 시 연결 오류가 발생할 수 있습니다.
 :::
+
+## Quick Start (바이너리 설치)
+
+**Node.js, npm 설치 불필요** - 바이너리만 다운로드하여 바로 사용
 
 ### 1. 바이너리 다운로드
 
