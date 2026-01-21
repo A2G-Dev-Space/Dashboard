@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Plus, Bug, Lightbulb, HelpCircle, Send, Trash2, MessageSquare,
-  CheckCircle, Clock, AlertCircle, X, ChevronDown, BookOpen, Zap, Image as ImageIcon, Edit2
+  CheckCircle, Clock, AlertCircle, X, ChevronDown, BookOpen, Zap, Image as ImageIcon, Edit2,
+  Maximize2, Minimize2, File, Download
 } from 'lucide-react';
 import { feedbackApi, serviceApi } from '../services/api';
 
@@ -143,6 +144,8 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
   const handleAddComment = async (id: string, content: string) => {
     try {
       await feedbackApi.addComment(id, content);
+      const response = await feedbackApi.get(id);
+      setSelectedFeedback(response.data);
       loadFeedbacks();
     } catch (error) {
       console.error('Failed to add comment:', error);
@@ -152,6 +155,8 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
   const handleUpdateComment = async (feedbackId: string, commentId: string, content: string) => {
     try {
       await feedbackApi.updateComment(feedbackId, commentId, content);
+      const response = await feedbackApi.get(feedbackId);
+      setSelectedFeedback(response.data);
       loadFeedbacks();
     } catch (error) {
       console.error('Failed to update comment:', error);
@@ -162,6 +167,8 @@ export default function Feedback({ isAdmin }: FeedbackProps) {
     if (!confirm('댓글을 삭제하시겠습니까?')) return;
     try {
       await feedbackApi.deleteComment(feedbackId, commentId);
+      const response = await feedbackApi.get(feedbackId);
+      setSelectedFeedback(response.data);
       loadFeedbacks();
     } catch (error) {
       console.error('Failed to delete comment:', error);
@@ -345,8 +352,10 @@ function CreateFeedbackModal({
   const [content, setContent] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [serviceId, setServiceId] = useState(defaultServiceId);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [loading, setLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -356,6 +365,31 @@ function CreateFeedbackModal({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        if (file.type.startsWith('image/')) {
+          setImages(prev => [...prev, base64]);
+        } else {
+          const fileData = JSON.stringify({
+            name: file.name,
+            type: file.type,
+            data: base64
+          });
+          setImages(prev => [...prev, fileData]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset input
+    e.target.value = '';
   };
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -386,17 +420,27 @@ function CreateFeedbackModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-100">
+      <div className={`bg-white rounded-2xl w-full flex flex-col transition-all duration-300 ${isMaximized ? 'max-w-[95vw] h-[95vh]' : 'max-w-5xl max-h-[90vh]'}`}>
+        <div className="p-6 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold text-gray-900">새 피드백</h2>
-            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsMaximized(!isMaximized)}
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-lg"
+                title={isMaximized ? '축소' : '확대'}
+              >
+                {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+              </button>
+              <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">카테고리</label>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
@@ -470,10 +514,27 @@ function CreateFeedbackModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              내용
-              <span className="text-gray-400 font-normal ml-2">(이미지 붙여넣기 가능)</span>
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                내용
+                <span className="text-gray-400 font-normal ml-2">(이미지 붙여넣기 가능)</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 text-sm text-samsung-blue hover:text-samsung-blue-dark font-medium transition-colors"
+              >
+                <ImageIcon className="w-4 h-4" />
+                파일/이미지 첨부
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => handleFileChange(e)}
+              />
+            </div>
             <textarea
               ref={textareaRef}
               value={content}
@@ -485,29 +546,51 @@ function CreateFeedbackModal({
             />
           </div>
 
-          {/* Image Preview */}
+          {/* Attachment Preview */}
           {images.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                첨부 이미지 ({images.length})
+                첨부 파일/이미지 ({images.length})
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {images.map((img, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={img}
-                      alt={`첨부 이미지 ${index + 1}`}
-                      className="w-full h-32 object-cover rounded-lg border border-gray-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeImage(index)}
-                      className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                {images.map((item, index) => {
+                  let isJson = false;
+                  let fileData: { name: string; type: string; data: string } | null = null;
+                  try {
+                    if (item.startsWith('{')) {
+                      fileData = JSON.parse(item);
+                      isJson = true;
+                    }
+                  } catch (e) {
+                    isJson = false;
+                  }
+
+                  return (
+                    <div key={index} className="relative group">
+                      {!isJson ? (
+                        <img
+                          src={item}
+                          alt={`첨부 이미지 ${index + 1}`}
+                          className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center w-full h-32 bg-gray-50 rounded-lg border border-gray-200 p-2 text-center">
+                          <File className="w-8 h-8 text-gray-400 mb-1" />
+                          <span className="text-[10px] text-gray-500 truncate w-full" title={fileData?.name}>
+                            {fileData?.name}
+                          </span>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -563,6 +646,7 @@ function FeedbackDetailModal({
   onDeleteComment: (feedbackId: string, commentId: string) => Promise<void>;
   onRefresh: () => void;
 }) {
+  const [isMaximized, setIsMaximized] = useState(false);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -621,6 +705,15 @@ function FeedbackDetailModal({
     }
   };
 
+  const handleDownload = (base64: string, filename: string) => {
+    const link = document.createElement('a');
+    link.href = base64;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const startEditComment = (comment: FeedbackComment) => {
     setEditingCommentId(comment.id);
     setEditingContent(comment.content);
@@ -637,8 +730,8 @@ function FeedbackDetailModal({
   return (
     <>
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
-          <div className="p-6 border-b border-gray-100">
+        <div className={`bg-white rounded-2xl w-full flex flex-col transition-all duration-300 ${isMaximized ? 'max-w-[95vw] h-[95vh]' : 'max-w-5xl max-h-[90vh]'}`}>
+          <div className="p-6 border-b border-gray-100 flex-shrink-0">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className={`p-2.5 rounded-xl ${category.bg}`}>
@@ -653,13 +746,23 @@ function FeedbackDetailModal({
                   </div>
                 </div>
               </div>
-              <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setIsMaximized(!isMaximized)}
+                  className="p-2 text-gray-400 hover:text-gray-600 rounded-lg"
+                  title={isMaximized ? '축소' : '확대'}
+                >
+                  {isMaximized ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                </button>
+                <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-6 overflow-y-auto flex-1">
             {/* Status Badge + Changer */}
             <div className="flex items-center gap-3">
               <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full ${statusInfo.bg} ${statusInfo.color}`}>
@@ -691,20 +794,51 @@ function FeedbackDetailModal({
               <p className="text-gray-700 whitespace-pre-wrap">{feedback.content}</p>
             </div>
 
-            {/* Images */}
+            {/* Attachments */}
             {feedback.images && feedback.images.length > 0 && (
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-3">첨부 이미지</h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-3">첨부 파일</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {feedback.images.map((img, index) => (
-                    <img
-                      key={index}
-                      src={img}
-                      alt={`첨부 이미지 ${index + 1}`}
-                      className="w-full h-32 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
-                      onClick={() => setSelectedImage(img)}
-                    />
-                  ))}
+                  {feedback.images.map((item, index) => {
+                    let isJson = false;
+                    let fileData: { name: string; type: string; data: string } | null = null;
+                    try {
+                      if (item.startsWith('{')) {
+                        fileData = JSON.parse(item);
+                        isJson = true;
+                      }
+                    } catch (e) {
+                      isJson = false;
+                    }
+
+                    if (!isJson) {
+                      return (
+                        <img
+                          key={index}
+                          src={item}
+                          alt={`첨부 이미지 ${index + 1}`}
+                          className="w-full h-32 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                          onClick={() => setSelectedImage(item)}
+                        />
+                      );
+                    }
+
+                    return (
+                      <div key={index} className="flex flex-col items-center justify-center w-full h-32 bg-gray-50 rounded-lg border border-gray-200 p-3 text-center">
+                        <File className="w-8 h-8 text-gray-400 mb-2" />
+                        <span className="text-xs text-gray-600 truncate w-full mb-2 font-medium" title={fileData?.name}>
+                          {fileData?.name}
+                        </span>
+                        <button
+                          onClick={() => fileData && handleDownload(fileData.data, fileData.name)}
+                          className="inline-flex items-center gap-1 text-xs text-samsung-blue hover:text-samsung-blue-dark font-semibold"
+                        >
+                          <Download className="w-3 h-3" />
+                          다운로드
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
