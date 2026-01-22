@@ -45,8 +45,8 @@ export default defineConfig({
     }],
   ],
 
-  // Google Fonts 비활성화
-  appearance: true,
+  // 다크모드를 기본으로 설정
+  appearance: 'dark',
 
   // 정적 빌드 설정 (docker-compose에서 docs/.vitepress/dist 마운트)
   // config.mts 위치 기준 상대경로
