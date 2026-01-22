@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { withBase } from 'vitepress'
+
+const videoSrc = withBase('/videos/fast-demos.mp4')
+
 const services = [
   {
     name: 'Nexus Coder',
@@ -64,8 +68,8 @@ const services = [
               muted
               loop
               playsinline
+              :src="videoSrc"
             >
-              <source src="/docs/videos/demo.mp4" type="video/mp4">
             </video>
             <div class="video-overlay"></div>
           </div>
