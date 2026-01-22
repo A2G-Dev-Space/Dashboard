@@ -1,7 +1,33 @@
 <script setup lang="ts">
+import { ref, onMounted, computed } from 'vue'
 import { withBase } from 'vitepress'
 
-const videoSrc = withBase('/videos/fast-demos.mp4')
+const videos = [
+  '/videos/vibe-coding-react.mp4',
+  '/videos/vibe-coding-streamlit.mp4',
+  '/videos/office-word.mp4',
+  '/videos/office-excel.mp4',
+  '/videos/office-powerpoint.mp4',
+]
+
+const currentVideoIndex = ref(0)
+const videoRef = ref<HTMLVideoElement | null>(null)
+
+const currentVideoSrc = computed(() => withBase(videos[currentVideoIndex.value]))
+
+const onVideoEnded = () => {
+  currentVideoIndex.value = (currentVideoIndex.value + 1) % videos.length
+}
+
+const setPlaybackRate = () => {
+  if (videoRef.value) {
+    videoRef.value.playbackRate = 5.0
+  }
+}
+
+onMounted(() => {
+  setPlaybackRate()
+})
 
 const services = [
   {
@@ -64,11 +90,13 @@ const services = [
         <div class="hero-video">
           <div class="video-container">
             <video
+              ref="videoRef"
               autoplay
               muted
-              loop
               playsinline
-              :src="videoSrc"
+              :src="currentVideoSrc"
+              @ended="onVideoEnded"
+              @loadeddata="setPlaybackRate"
             >
             </video>
             <div class="video-overlay"></div>
