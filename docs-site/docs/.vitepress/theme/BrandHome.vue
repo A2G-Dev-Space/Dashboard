@@ -64,7 +64,6 @@ const services = [
               muted
               loop
               playsinline
-              poster="/docs/images/demo-poster.png"
             >
               <source src="/docs/videos/demo.mp4" type="video/mp4">
             </video>
