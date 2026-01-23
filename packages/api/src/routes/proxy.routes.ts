@@ -225,18 +225,40 @@ function buildChatCompletionsUrl(endpointUrl: string): string {
 
 /**
  * GET /v1/models
- * Returns list of available models from Admin Server
+ * Returns list of available models for the specified service
+ * - X-Service-Id 헤더가 있으면 해당 서비스의 모델만 반환
+ * - 헤더가 없으면 기본 서비스(nexus-coder)의 모델만 반환
  */
-proxyRoutes.get('/models', async (_req: Request, res: Response) => {
+proxyRoutes.get('/models', async (req: Request, res: Response) => {
   try {
+    // Get service ID from header or use default
+    const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
+
+    // Reject requests from unregistered services
+    if (serviceError) {
+      res.status(403).json({ error: serviceError });
+      return;
+    }
+
+    // Build where clause based on service
+    const whereClause: { enabled: boolean; serviceId?: string | null } = { enabled: true };
+    if (serviceId) {
+      whereClause.serviceId = serviceId;
+    }
+
     const models = await prisma.model.findMany({
-      where: { enabled: true },
+      where: whereClause,
       select: {
         id: true,
         name: true,
         displayName: true,
         maxTokens: true,
         sortOrder: true,
+        service: {
+          select: {
+            name: true,
+          },
+        },
       },
       orderBy: [
         { sortOrder: 'asc' },
@@ -251,7 +273,7 @@ proxyRoutes.get('/models', async (_req: Request, res: Response) => {
         id: model.name,
         object: 'model',
         created: Date.now(),
-        owned_by: 'nexus-coder',
+        owned_by: model.service?.name || 'unknown',
         permission: [],
         root: model.name,
         parent: null,
@@ -568,25 +590,50 @@ proxyRoutes.get('/health', async (_req: Request, res: Response) => {
 
 /**
  * GET /v1/models/:model
- * Get specific model info
+ * Get specific model info for the specified service
  */
 proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
   try {
     const { modelName } = req.params;
 
+    // Get service ID from header or use default
+    const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
+
+    // Reject requests from unregistered services
+    if (serviceError) {
+      res.status(403).json({ error: serviceError });
+      return;
+    }
+
+    // Build where clause
+    const whereClause: {
+      OR: Array<{ name: string } | { id: string }>;
+      enabled: boolean;
+      serviceId?: string | null;
+    } = {
+      OR: [
+        { name: modelName },
+        { id: modelName },
+      ],
+      enabled: true,
+    };
+
+    if (serviceId) {
+      whereClause.serviceId = serviceId;
+    }
+
     const model = await prisma.model.findFirst({
-      where: {
-        OR: [
-          { name: modelName },
-          { id: modelName },
-        ],
-        enabled: true,
-      },
+      where: whereClause,
       select: {
         id: true,
         name: true,
         displayName: true,
         maxTokens: true,
+        service: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
 
@@ -599,7 +646,7 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
       id: model.name,
       object: 'model',
       created: Date.now(),
-      owned_by: 'nexus-coder',
+      owned_by: model.service?.name || 'unknown',
       permission: [],
       root: model.name,
       parent: null,
