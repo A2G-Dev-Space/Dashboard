@@ -131,8 +131,8 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Developed by syngha.han, byeongju.lee, young87.kim',
-      copyright: 'Nexus Coder - Internal Use Only'
+      message: 'Developed by syngha.han',
+      copyright: 'AX Portal - Internal Use Only'
     },
 
     search: {

@@ -29,6 +29,8 @@ onMounted(() => {
   setPlaybackRate()
 })
 
+const feedbackLink = withBase('/feedback')
+
 const services = [
   {
     name: 'Nexus Coder',
@@ -144,7 +146,7 @@ const services = [
             서비스 이용 중 궁금한 점이나 개선 요청은
             <span class="contact-name">syngha.han</span>에게 연락하시거나
           </p>
-          <a href="http://a2g.samsungds.net:4090/feedback" class="contact-btn">
+          <a :href="feedbackLink" class="contact-btn">
             <span>📝</span> Feedback 페이지 바로가기
           </a>
         </div>
@@ -559,5 +561,62 @@ const services = [
     text-align: center;
     padding: 28px 24px;
   }
+}
+
+/* Light mode styles */
+:not(.dark) .service-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+:not(.dark) .service-card:hover {
+  background: white;
+  border-color: #6366f1;
+  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15);
+}
+
+:not(.dark) .service-card.featured {
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
+  border-color: #6366f1;
+}
+
+:not(.dark) .service-card h3 {
+  color: #1e293b;
+}
+
+:not(.dark) .service-tagline {
+  color: #6366f1;
+}
+
+:not(.dark) .service-desc {
+  color: #64748b;
+}
+
+:not(.dark) .service-tags span {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+:not(.dark) .card-arrow {
+  color: #94a3b8;
+}
+
+:not(.dark) .service-card:hover .card-arrow {
+  color: #6366f1;
+}
+
+:not(.dark) .contact-card {
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
+  border: 1px solid #e2e8f0;
+}
+
+:not(.dark) .contact-content h3 {
+  color: #1e293b;
+}
+
+:not(.dark) .contact-info {
+  color: #64748b;
 }
 </style>
