@@ -130,7 +130,7 @@ const services = [
             <div class="service-tags">
               <span v-for="tag in service.tags" :key="tag">{{ tag }}</span>
             </div>
-            <div class="card-arrow">→</div>
+            <div class="card-cta">Click!</div>
           </div>
         </a>
       </div>
@@ -439,18 +439,22 @@ const services = [
   color: rgba(255, 255, 255, 0.7);
 }
 
-.card-arrow {
-  position: absolute;
-  bottom: 28px;
-  right: 28px;
-  font-size: 1.5rem;
-  color: rgba(255, 255, 255, 0.3);
+.card-cta {
+  margin-top: 20px;
+  padding: 8px 20px;
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: white;
+  text-align: center;
   transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
-.service-card:hover .card-arrow {
-  transform: translateX(4px);
-  color: #60a5fa;
+.service-card:hover .card-cta {
+  transform: scale(1.02);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
 }
 
 /* Contact Section */
@@ -602,12 +606,9 @@ html:not(.dark) .service-tags span {
   color: #475569 !important;
 }
 
-html:not(.dark) .card-arrow {
-  color: #94a3b8 !important;
-}
-
-html:not(.dark) .service-card:hover .card-arrow {
-  color: #6366f1 !important;
+html:not(.dark) .card-cta {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%) !important;
+  color: white !important;
 }
 
 html:not(.dark) .contact-card {
