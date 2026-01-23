@@ -1144,12 +1144,12 @@ adminRoutes.get('/stats/model-daily-trend', async (req: AuthenticatedRequest, re
 
     // Process into date-keyed structure
     const dateMap = new Map<string, Record<string, number>>();
-    const modelIds = models.map((m) => m.id);
+    const existingModelIds = models.map((m) => m.id);
 
     for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0]!;
       const initialData: Record<string, number> = {};
-      for (const modelId of modelIds) {
+      for (const modelId of existingModelIds) {
         initialData[modelId] = 0;
       }
       dateMap.set(dateStr, initialData);
