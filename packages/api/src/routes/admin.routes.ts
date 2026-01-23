@@ -55,6 +55,9 @@ const modelSchema = z.object({
  * Query: ?serviceId= (optional)
  * - SUPER_ADMIN/VIEWER: all models or filtered by serviceId
  * - SERVICE_ADMIN/SERVICE_VIEWER: only models from assigned services
+ * When serviceId is provided, returns both:
+ * - Models registered to that service (model.serviceId)
+ * - Models that have been USED by that service (from usage_logs)
  */
 adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
   try {
@@ -64,7 +67,7 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
     const accessibleServiceIds = await getAccessibleServiceIds(req);
 
     // Build where clause
-    let whereClause: { serviceId?: string | { in: string[] } } = {};
+    let whereClause: { serviceId?: string | { in: string[] }; id?: { in: string[] } } = {};
 
     if (serviceId) {
       // If specific serviceId requested, check access
@@ -72,7 +75,24 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
         res.status(403).json({ error: 'No access to this service' });
         return;
       }
-      whereClause = { serviceId };
+
+      // Get models that have been USED by this service (from usage_logs)
+      const usedModels = await prisma.$queryRaw<Array<{ model_id: string }>>`
+        SELECT DISTINCT model_id
+        FROM usage_logs
+        WHERE service_id::text = ${serviceId}
+      `;
+      const usedModelIds = usedModels.map((m) => m.model_id);
+
+      // Combine: models registered to this service OR models used by this service
+      whereClause = {
+        id: { in: usedModelIds },
+      };
+
+      // If no usage records, fall back to models registered to this service
+      if (usedModelIds.length === 0) {
+        whereClause = { serviceId };
+      }
     } else if (accessibleServiceIds !== null) {
       // Filter to accessible services only
       whereClause = { serviceId: { in: accessibleServiceIds } };
