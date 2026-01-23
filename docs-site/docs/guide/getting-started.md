@@ -46,45 +46,40 @@ Windows에서 WSL을 처음 설정하는 경우 [WSL 설정 가이드](https://d
 
 ### 1. 바이너리 다운로드
 
-GitHub에서 두 파일을 다운로드합니다:
+A2G 파일 서버에서 두 파일을 다운로드합니다:
 
 ```bash
 # 다운로드 폴더 생성
 mkdir -p ~/nexus-download && cd ~/nexus-download
 
-# nexus.gz 다운로드 (39MB)
-wget https://github.samsungds.net/syngha-han/nexus-coder/raw/main/nexus.gz --no-check-certificate
+# nexus-3.2.3.gz 다운로드
+wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-3.2.3.gz
 
-# yoga.wasm 다운로드 (87KB)
-wget https://github.samsungds.net/syngha-han/nexus-coder/raw/main/yoga.wasm --no-check-certificate
+# yoga.wasm 다운로드
+wget http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 ```
 
 ::: tip wget 대신 curl 사용
 ```bash
-curl -kLO https://github.samsungds.net/syngha-han/nexus-coder/raw/main/nexus.gz
-curl -kLO https://github.samsungds.net/syngha-han/nexus-coder/raw/main/yoga.wasm
+curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-3.2.3.gz
+curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 ```
 :::
 
 ::: warning 다운로드가 안 될 경우
+- NO_PROXY 설정 확인 (위 필수 설정 참조)
 - 프록시 설정 확인 (`http_proxy`, `https_proxy` 환경변수)
-- SSL 인증서 오류 시 우회 옵션 사용:
-  - wget: `--no-check-certificate`
-  - curl: `-k`
-
-**수동 다운로드 (브라우저):**
-1. https://github.samsungds.net/syngha-han/nexus-coder 접속
-2. `nexus.gz`와 `yoga.wasm` 파일 각각 다운로드
-3. 두 파일을 같은 폴더에 저장 (예: `~/nexus-download/`)
+- `a2g.samsungds.net`이 NO_PROXY에 포함되어 있는지 확인
 :::
 
 ### 2. 압축 해제 및 실행 권한 부여
 
 ```bash
 # 압축 해제
-gunzip nexus.gz
+gunzip nexus-3.2.3.gz
 
-# 실행 권한 부여
+# 파일명 변경 및 실행 권한 부여
+mv nexus-3.2.3 nexus
 chmod +x nexus
 ```
 
