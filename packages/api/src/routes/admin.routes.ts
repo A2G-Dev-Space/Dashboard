@@ -1094,9 +1094,29 @@ adminRoutes.get('/stats/model-daily-trend', async (req: AuthenticatedRequest, re
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // Get all models (optionally filtered by service)
+    // Get models that were actually USED by this service (not just registered to it)
+    // This ensures we show usage data even if models are registered under a different service
+    let modelIds: string[];
+    if (serviceId) {
+      const usedModels = await prisma.$queryRaw<Array<{ model_id: string }>>`
+        SELECT DISTINCT model_id
+        FROM usage_logs
+        WHERE timestamp >= ${startDate}
+          AND service_id::text = ${serviceId}
+      `;
+      modelIds = usedModels.map((m) => m.model_id);
+    } else {
+      const usedModels = await prisma.$queryRaw<Array<{ model_id: string }>>`
+        SELECT DISTINCT model_id
+        FROM usage_logs
+        WHERE timestamp >= ${startDate}
+      `;
+      modelIds = usedModels.map((m) => m.model_id);
+    }
+
+    // Get model details for the used models
     const models = await prisma.model.findMany({
-      where: getServiceFilter(serviceId),
+      where: { id: { in: modelIds } },
       select: { id: true, name: true, displayName: true },
     });
 
