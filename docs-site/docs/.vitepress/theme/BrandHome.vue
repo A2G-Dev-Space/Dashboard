@@ -563,60 +563,63 @@ const services = [
   }
 }
 
-/* Light mode styles */
-:not(.dark) .service-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+</style>
+
+<style>
+/* Light mode styles - unscoped to access html class */
+html:not(.dark) .service-card {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06) !important;
 }
 
-:not(.dark) .service-card:hover {
-  background: white;
-  border-color: #6366f1;
-  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15);
+html:not(.dark) .service-card:hover {
+  background: white !important;
+  border-color: #6366f1 !important;
+  box-shadow: 0 12px 40px rgba(99, 102, 241, 0.15) !important;
 }
 
-:not(.dark) .service-card.featured {
-  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
-  border-color: #6366f1;
+html:not(.dark) .service-card.featured {
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%) !important;
+  border-color: #6366f1 !important;
 }
 
-:not(.dark) .service-card h3 {
-  color: #1e293b;
+html:not(.dark) .service-card h3 {
+  color: #1e293b !important;
 }
 
-:not(.dark) .service-tagline {
-  color: #6366f1;
+html:not(.dark) .service-tagline {
+  color: #6366f1 !important;
 }
 
-:not(.dark) .service-desc {
-  color: #64748b;
+html:not(.dark) .service-desc {
+  color: #64748b !important;
 }
 
-:not(.dark) .service-tags span {
-  background: #f1f5f9;
-  border-color: #e2e8f0;
-  color: #475569;
+html:not(.dark) .service-tags span {
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
 }
 
-:not(.dark) .card-arrow {
-  color: #94a3b8;
+html:not(.dark) .card-arrow {
+  color: #94a3b8 !important;
 }
 
-:not(.dark) .service-card:hover .card-arrow {
-  color: #6366f1;
+html:not(.dark) .service-card:hover .card-arrow {
+  color: #6366f1 !important;
 }
 
-:not(.dark) .contact-card {
-  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
-  border: 1px solid #e2e8f0;
+html:not(.dark) .contact-card {
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%) !important;
+  border: 1px solid #e2e8f0 !important;
 }
 
-:not(.dark) .contact-content h3 {
-  color: #1e293b;
+html:not(.dark) .contact-content h3 {
+  color: #1e293b !important;
 }
 
-:not(.dark) .contact-info {
-  color: #64748b;
+html:not(.dark) .contact-info {
+  color: #64748b !important;
 }
 </style>
