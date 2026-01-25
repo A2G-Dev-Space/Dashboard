@@ -24,4 +24,5 @@ COPY postcss.config.js ./
 EXPOSE 5173
 
 # Start Vite dev server with host binding for Docker
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Shell form으로 변경하여 -- 옵션 전달
+CMD npm run dev -- --host 0.0.0.0 --port 5173
