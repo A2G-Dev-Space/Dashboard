@@ -1,0 +1,27 @@
+# Development stage - Vite dev server with hot-reload
+FROM node:24-alpine
+
+WORKDIR /app
+
+# SSL 인증서 검증 비활성화 (사내 네트워크)
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+RUN npm config set strict-ssl false
+
+# Copy package files
+COPY package*.json ./
+
+# Install ALL dependencies (including devDependencies)
+RUN npm install --include=dev
+
+# Copy config files (source will be mounted as volume)
+COPY tsconfig.json ./
+COPY tsconfig.node.json ./
+COPY vite.config.ts ./
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
+
+# Expose Vite dev server port
+EXPOSE 5173
+
+# Start Vite dev server with host binding for Docker
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

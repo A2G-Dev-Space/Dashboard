@@ -1,0 +1,66 @@
+version: '3.8'
+
+# ============================================
+# AI Services Dashboard - Development Mode
+# ============================================
+# UI/UX 테스트용 별도 포트 사용
+# 기존 docker-compose.yml의 postgres, redis, api는 그대로 유지
+#
+# 사용법:
+#   1. 기존 서비스 실행: docker compose up -d
+#   2. Dev 모드 실행: docker compose -f docker-compose.dev.yml up
+#   3. Dashboard: http://localhost:4093
+#   4. Docs: http://localhost:4094
+
+# 사내 네트워크 프록시 설정
+x-proxy-env: &proxy-env
+  HTTP_PROXY: "${HTTP_PROXY:-}"
+  HTTPS_PROXY: "${HTTPS_PROXY:-}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  http_proxy: "${HTTP_PROXY:-}"
+  https_proxy: "${HTTPS_PROXY:-}"
+  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  NODE_TLS_REJECT_UNAUTHORIZED: "${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
+
+services:
+  # Dashboard Dev Server (Vite hot-reload)
+  dashboard-dev:
+    build:
+      context: ./packages/dashboard
+      dockerfile: Dockerfile.dev
+      args:
+        <<: *proxy-env
+    container_name: dashboard-dev
+    restart: unless-stopped
+    environment:
+      <<: *proxy-env
+      # 기존 API 서버 사용 (docker-compose.yml의 nginx:4090)
+      VITE_API_URL: http://localhost:4090/api
+    volumes:
+      # 소스 마운트 (hot-reload)
+      - ./packages/dashboard/src:/app/src
+      - ./packages/dashboard/public:/app/public
+      - ./packages/dashboard/index.html:/app/index.html
+    ports:
+      - "${DASHBOARD_DEV_PORT:-4093}:5173"
+    # 기존 API에 네트워크로 접근
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Docs Site Dev Server (VitePress hot-reload)
+  docs-dev:
+    build:
+      context: ./docs-site
+      dockerfile: Dockerfile.dev
+      args:
+        <<: *proxy-env
+    container_name: docs-dev
+    restart: unless-stopped
+    environment:
+      <<: *proxy-env
+    volumes:
+      # 소스 마운트 (hot-reload)
+      - ./docs-site/docs:/app/docs
+      - ./docs-site/.vitepress:/app/.vitepress
+    ports:
+      - "${DOCS_DEV_PORT:-4094}:5173"

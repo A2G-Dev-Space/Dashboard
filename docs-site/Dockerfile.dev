@@ -1,0 +1,20 @@
+# Development stage - VitePress dev server with hot-reload
+FROM node:24-alpine
+
+WORKDIR /app
+
+# SSL 인증서 검증 비활성화 (사내 네트워크)
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+RUN npm config set strict-ssl false
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Expose VitePress dev server port
+EXPOSE 5173
+
+# Start VitePress dev server with host binding for Docker
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
