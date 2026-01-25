@@ -369,12 +369,12 @@ async function handleNonStreamingRequest(
   model: { id: string; name: string; endpointUrl: string; apiKey: string | null },
   requestBody: any,
   headers: Record<string, string>,
-  user: { id: string; loginid: string },
+  user: { id: string; loginid: string; username: string; deptname: string },
   serviceId: string | null
 ) {
   try {
     const url = buildChatCompletionsUrl(model.endpointUrl);
-    console.log(`[Proxy] Non-streaming request to: ${url}`);
+    console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} (non-streaming)`);
 
     // Latency 측정 시작
     const startTime = Date.now();
@@ -429,7 +429,7 @@ async function handleStreamingRequest(
   model: { id: string; name: string; endpointUrl: string; apiKey: string | null },
   requestBody: any,
   headers: Record<string, string>,
-  user: { id: string; loginid: string },
+  user: { id: string; loginid: string; username: string; deptname: string },
   serviceId: string | null
 ) {
   // Latency 측정 시작 (전체 스트리밍 완료까지)
@@ -437,7 +437,7 @@ async function handleStreamingRequest(
 
   try {
     const url = buildChatCompletionsUrl(model.endpointUrl);
-    console.log(`[Proxy] Streaming request to: ${url}`);
+    console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} (streaming)`);
 
     // stream_options를 추가하여 usage 정보 요청 (OpenAI compatible)
     // 일부 LLM은 이 옵션을 지원하지 않을 수 있으므로 원본도 유지
