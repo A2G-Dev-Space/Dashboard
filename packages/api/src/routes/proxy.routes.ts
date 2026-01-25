@@ -297,6 +297,12 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
  */
 proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
   try {
+    // Debug: 헤더 로깅
+    const userId = req.headers['x-user-id'];
+    const userName = req.headers['x-user-name'];
+    const userDept = req.headers['x-user-dept'];
+    console.log(`[Debug] Headers received: X-User-Id=${userId || 'MISSING'}, X-User-Name=${userName || 'MISSING'}, X-User-Dept=${userDept || 'MISSING'}`);
+
     const { model: modelName, messages, stream, ...otherParams } = req.body;
 
     if (!modelName || !messages) {
