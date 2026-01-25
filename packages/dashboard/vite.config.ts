@@ -14,6 +14,8 @@ export default defineConfig({
         // dashboard-api (container_name) 또는 api (service_name)
         target: 'http://dashboard-api:3000',
         changeOrigin: true,
+        // /api prefix 제거 (nginx와 동일하게 동작)
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },
