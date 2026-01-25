@@ -63,11 +63,11 @@ source ~/.bashrc
 
 # 1. 다운로드
 mkdir -p ~/nexus-download && cd ~/nexus-download
-wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-3.2.3.gz
+wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-3.2.13.gz
 wget http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 
 # 2. 압축 해제 및 실행
-gunzip nexus-3.2.3.gz && mv nexus-3.2.3 nexus && chmod +x nexus
+gunzip nexus-3.2.13.gz && mv nexus-3.2.13 nexus && chmod +x nexus
 ./nexus
 
 # 3. 셸 리로드 후 어디서든 실행
