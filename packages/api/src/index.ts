@@ -27,6 +27,10 @@ import 'dotenv/config';
 const app = express();
 const PORT = process.env['PORT'] || 3000;
 
+// Trust first proxy (nginx)
+// Required for express-rate-limit to work correctly behind reverse proxy
+app.set('trust proxy', 1);
+
 // Initialize Prisma
 export const prisma = new PrismaClient();
 
