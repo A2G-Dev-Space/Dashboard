@@ -6,6 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '0.0.0.0',
+    // 모든 호스트 허용 (Docker 환경)
+    allowedHosts: ['a2g.samsungds.net', 'localhost', '127.0.0.1'],
     proxy: {
       '/api': {
         // Docker 네트워크 내에서 API 컨테이너 접근
