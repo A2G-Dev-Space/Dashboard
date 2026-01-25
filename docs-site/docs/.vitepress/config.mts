@@ -45,8 +45,8 @@ export default defineConfig({
     }],
   ],
 
-  // 다크모드를 기본으로 설정
-  appearance: 'dark',
+  // 라이트모드를 기본으로 설정
+  appearance: 'light',
 
   // 정적 빌드 설정 (docker-compose에서 docs/.vitepress/dist 마운트)
   // config.mts 위치 기준 상대경로
