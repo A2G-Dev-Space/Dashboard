@@ -329,32 +329,50 @@ export default function Holidays() {
           <button
             onClick={handlePrevMonth}
             className="p-2 hover:bg-pastel-100 rounded-lg transition-colors"
+            title="이전 달"
           >
             <ChevronLeft className="w-5 h-5 text-pastel-600" />
           </button>
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setCurrentYear(currentYear - 1)}
-              className="text-pastel-500 hover:text-pastel-700"
+          <div className="flex items-center gap-2">
+            {/* Year Dropdown */}
+            <select
+              value={currentYear}
+              onChange={(e) => setCurrentYear(parseInt(e.target.value))}
+              className="px-3 py-2 text-lg font-semibold text-pastel-800 bg-pastel-50 border border-pastel-200 rounded-lg cursor-pointer hover:bg-pastel-100 focus:outline-none focus:ring-2 focus:ring-samsung-blue"
             >
-              <ChevronLeft className="w-4 h-4" />
+              {Array.from({ length: 10 }, (_, i) => today.getFullYear() - 3 + i).map((year) => (
+                <option key={year} value={year}>{year}년</option>
+              ))}
+            </select>
+            {/* Month Dropdown */}
+            <select
+              value={currentMonth}
+              onChange={(e) => setCurrentMonth(parseInt(e.target.value))}
+              className="px-3 py-2 text-lg font-semibold text-pastel-800 bg-pastel-50 border border-pastel-200 rounded-lg cursor-pointer hover:bg-pastel-100 focus:outline-none focus:ring-2 focus:ring-samsung-blue"
+            >
+              {MONTHS.map((month, idx) => (
+                <option key={idx} value={idx}>{month}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleNextMonth}
+              className="p-2 hover:bg-pastel-100 rounded-lg transition-colors"
+              title="다음 달"
+            >
+              <ChevronRight className="w-5 h-5 text-pastel-600" />
             </button>
-            <h2 className="text-xl font-semibold text-pastel-800">
-              {currentYear}년 {MONTHS[currentMonth]}
-            </h2>
             <button
-              onClick={() => setCurrentYear(currentYear + 1)}
-              className="text-pastel-500 hover:text-pastel-700"
+              onClick={() => {
+                setCurrentYear(today.getFullYear());
+                setCurrentMonth(today.getMonth());
+              }}
+              className="px-3 py-2 text-sm font-medium text-samsung-blue bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
+              오늘
             </button>
           </div>
-          <button
-            onClick={handleNextMonth}
-            className="p-2 hover:bg-pastel-100 rounded-lg transition-colors"
-          >
-            <ChevronRight className="w-5 h-5 text-pastel-600" />
-          </button>
         </div>
 
         {/* Weekday headers */}
@@ -408,9 +426,14 @@ export default function Holidays() {
                     >
                       {date?.getDate()}
                     </span>
-                    {weekend && isCurrentMonth && (
-                      <span className="text-[10px] text-pastel-400">주말</span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {todayClass && (
+                        <span className="text-[10px] text-samsung-blue font-medium">오늘</span>
+                      )}
+                      {weekend && isCurrentMonth && (
+                        <span className="text-[10px] text-pastel-400">주말</span>
+                      )}
+                    </div>
                   </div>
                   <div className="space-y-1">
                     {dayHolidays.slice(0, 3).map((h) => (
