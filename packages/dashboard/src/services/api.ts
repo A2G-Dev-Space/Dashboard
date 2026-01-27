@@ -181,3 +181,36 @@ interface CreateServiceData {
   iconUrl?: string;
   enabled?: boolean;
 }
+
+// 휴일 관리 API
+export interface Holiday {
+  id: string;
+  date: string;
+  name: string;
+  type: 'NATIONAL' | 'COMPANY' | 'CUSTOM';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateHolidayData {
+  date: string;  // YYYY-MM-DD
+  name: string;
+  type?: 'NATIONAL' | 'COMPANY' | 'CUSTOM';
+}
+
+export const holidaysApi = {
+  list: (year?: number, month?: number) =>
+    api.get<{ holidays: Holiday[] }>('/holidays', { params: { year, month } }),
+  getByYear: (year: number) =>
+    api.get<{ holidays: Holiday[]; year: number }>(`/holidays/${year}`),
+  getDates: (days = 365) =>
+    api.get<{ dates: string[] }>('/holidays/dates', { params: { days } }),
+  create: (data: CreateHolidayData) =>
+    api.post<{ holiday: Holiday }>('/holidays', data),
+  bulkCreate: (holidays: CreateHolidayData[]) =>
+    api.post<{ message: string; created: Array<{ date: string; name: string }>; skipped: Array<{ date: string; reason: string }> }>('/holidays/bulk', { holidays }),
+  update: (id: string, data: Partial<Omit<CreateHolidayData, 'date'>>) =>
+    api.put<{ holiday: Holiday }>(`/holidays/${id}`, data),
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/holidays/${id}`),
+};

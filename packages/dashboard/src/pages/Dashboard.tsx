@@ -17,6 +17,12 @@ interface OverviewStats {
   totalModels: number;
 }
 
+interface ServiceStats {
+  serviceId: string;
+  avgDailyActiveUsers: number;
+  avgDailyActiveUsersExcluding: number;
+}
+
 interface ServiceInfo {
   id: string;
   name: string;
@@ -31,6 +37,7 @@ interface DashboardProps {
 export default function Dashboard({ serviceId }: DashboardProps) {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [serviceInfo, setServiceInfo] = useState<ServiceInfo | null>(null);
+  const [serviceStats, setServiceStats] = useState<ServiceStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -40,10 +47,21 @@ export default function Dashboard({ serviceId }: DashboardProps) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [overviewRes] = await Promise.all([
+      const [overviewRes, globalRes] = await Promise.all([
         statsApi.overview(serviceId),
+        statsApi.globalOverview(),
       ]);
       setOverview(overviewRes.data);
+
+      // Extract service-specific stats from global overview
+      if (serviceId && globalRes.data.services) {
+        const svcStats = globalRes.data.services.find(
+          (s: ServiceStats) => s.serviceId === serviceId
+        );
+        if (svcStats) {
+          setServiceStats(svcStats);
+        }
+      }
 
       // Load service info if serviceId is provided
       if (serviceId) {
@@ -89,6 +107,15 @@ export default function Dashboard({ serviceId }: DashboardProps) {
       description: '등록된 사용자',
     },
     {
+      label: '일평균 활성(영업일)',
+      value: serviceStats?.avgDailyActiveUsersExcluding || 0,
+      icon: Activity,
+      color: 'bg-orange-500',
+      bgLight: 'bg-orange-50',
+      description: '주말/휴일 제외',
+      highlight: true,
+    },
+    {
       label: '활성 모델',
       value: overview?.totalModels || 0,
       icon: Server,
@@ -98,7 +125,7 @@ export default function Dashboard({ serviceId }: DashboardProps) {
     },
     {
       label: '오늘 요청',
-      value: overview?.todayUsage.requests || 0,
+      value: overview?.todayUsage?.requests || 0,
       icon: Zap,
       color: 'bg-amber-500',
       bgLight: 'bg-amber-50',
@@ -124,16 +151,20 @@ export default function Dashboard({ serviceId }: DashboardProps) {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        {stats.map(({ label, value, icon: Icon, color, bgLight, description }) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
+        {stats.map(({ label, value, icon: Icon, color, bgLight, description, highlight }) => (
           <div
             key={label}
-            className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300"
+            className={`bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300 ${
+              highlight ? 'border-l-4 border-orange-400' : ''
+            }`}
           >
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-500">{label}</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(value)}</p>
+                <p className={`text-2xl font-bold mt-1 ${highlight ? 'text-orange-600' : 'text-gray-900'}`}>
+                  {formatNumber(value)}
+                </p>
                 <p className="text-xs text-gray-400 mt-1">{description}</p>
               </div>
               <div className={`p-3 rounded-xl ${bgLight}`}>
@@ -150,13 +181,13 @@ export default function Dashboard({ serviceId }: DashboardProps) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="text-center p-4 bg-gray-50 rounded-xl">
             <p className="text-2xl font-bold text-samsung-blue">
-              {formatNumber(overview?.todayUsage.inputTokens || 0)}
+              {formatNumber(overview?.todayUsage?.inputTokens || 0)}
             </p>
             <p className="text-sm text-gray-500 mt-1">입력 토큰</p>
           </div>
           <div className="text-center p-4 bg-gray-50 rounded-xl">
             <p className="text-2xl font-bold text-samsung-blue">
-              {formatNumber(overview?.todayUsage.outputTokens || 0)}
+              {formatNumber(overview?.todayUsage?.outputTokens || 0)}
             </p>
             <p className="text-sm text-gray-500 mt-1">출력 토큰</p>
           </div>

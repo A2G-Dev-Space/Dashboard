@@ -96,6 +96,7 @@ interface GlobalTotals {
   totalServices: number;
   totalUsers: number;
   avgDailyActiveUsers: number;
+  avgDailyActiveUsersExcluding: number;  // 주말/휴일 제외
   totalRequests: number;
   totalTokens: number;
 }
@@ -257,6 +258,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   // Use deduplicated totals from API (users/avgDailyActiveUsers are deduplicated across services)
   const totalUsers = globalTotals?.totalUsers ?? 0;
   const avgDailyActive = globalTotals?.avgDailyActiveUsers ?? 0;
+  const avgDailyActiveExcluding = globalTotals?.avgDailyActiveUsersExcluding ?? 0;
   const totalTokens = globalTotals?.totalTokens ?? globalOverview.reduce((sum, s) => sum + s.totalTokens, 0);
   const totalRequests = globalTotals?.totalRequests ?? globalOverview.reduce((sum, s) => sum + s.totalRequests, 0);
 
@@ -482,7 +484,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
   return (
     <div className="space-y-6">
       {/* Global Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
         <div className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300">
           <div className="flex items-start justify-between">
             <div>
@@ -504,6 +506,18 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             </div>
             <div className="p-3 rounded-xl bg-emerald-50">
               <Activity className="w-5 h-5 text-emerald-500" />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300 border-l-4 border-orange-400">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-500">DAU (주말/휴일 제외)</p>
+              <p className="text-2xl font-bold text-orange-600 mt-1">{formatNumber(Math.round(avgDailyActiveExcluding))}</p>
+              <p className="text-xs text-gray-400 mt-1">영업일 기준 평균</p>
+            </div>
+            <div className="p-3 rounded-xl bg-orange-50">
+              <Activity className="w-5 h-5 text-orange-500" />
             </div>
           </div>
         </div>

@@ -20,6 +20,7 @@ import { feedbackRoutes } from './routes/feedback.routes.js';
 import { myUsageRoutes } from './routes/my-usage.routes.js';
 import { ratingRoutes } from './routes/rating.routes.js';
 import { serviceRoutes } from './routes/service.routes.js';
+import { holidaysRoutes } from './routes/holidays.routes.js';
 
 // Load environment variables
 import 'dotenv/config';
@@ -68,6 +69,7 @@ app.use('/admin', adminRoutes);
 app.use('/feedback', feedbackRoutes);
 app.use('/my-usage', myUsageRoutes);
 app.use('/rating', ratingRoutes);
+app.use('/holidays', holidaysRoutes);
 
 // LLM Proxy Routes (OpenAI-compatible)
 app.use('/v1', proxyRoutes);

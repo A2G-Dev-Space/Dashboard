@@ -1346,7 +1346,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
     // Get per-service statistics
     const serviceStats = await Promise.all(
       services.map(async (service) => {
-        const [totalUsers, todayRequests, avgDailyUsers, totalTokens] = await Promise.all([
+        const [totalUsers, todayRequests, avgDailyUsers, avgDailyUsersExcluding, totalTokens] = await Promise.all([
           // Total unique users for this service
           prisma.usageLog.groupBy({
             by: ['userId'],
@@ -1378,6 +1378,25 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
             ) daily_counts
           `.then((r) => Math.round(r[0]?.avg_users || 0)),
 
+          // Average daily active users EXCLUDING weekends and holidays
+          prisma.$queryRaw<Array<{ avg_users: number }>>`
+            SELECT COALESCE(AVG(user_count), 0)::float as avg_users
+            FROM (
+              SELECT DATE(ul.timestamp) as log_date, COUNT(DISTINCT ul.user_id) as user_count
+              FROM usage_logs ul
+              INNER JOIN users u ON ul.user_id = u.id
+              WHERE ul.service_id::text = ${service.id}
+                AND ul.timestamp >= NOW() - INTERVAL '30 days'
+                AND u.loginid != 'anonymous'
+                AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
+                AND NOT EXISTS (
+                  SELECT 1 FROM holidays h
+                  WHERE h.date = DATE(ul.timestamp)
+                )
+              GROUP BY DATE(ul.timestamp)
+            ) daily_counts
+          `.then((r) => Math.round(r[0]?.avg_users || 0)),
+
           // Total tokens
           prisma.usageLog.aggregate({
             where: { serviceId: service.id },
@@ -1392,6 +1411,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           totalUsers,
           todayRequests,
           avgDailyActiveUsers: avgDailyUsers,  // Fixed: renamed to match frontend
+          avgDailyActiveUsersExcluding: avgDailyUsersExcluding,  // Excluding weekends & holidays
           totalTokens,
           totalModels: service._count.models,
         };
@@ -1399,7 +1419,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
     );
 
     // Overall totals - deduplicate users across services
-    const [uniqueUsersResult, avgDailyActiveResult] = await Promise.all([
+    const [uniqueUsersResult, avgDailyActiveResult, avgDailyActiveExcludingResult] = await Promise.all([
       prisma.$queryRaw<Array<{ count: bigint }>>`
         SELECT COUNT(DISTINCT user_id) as count
         FROM usage_logs ul
@@ -1418,14 +1438,33 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           GROUP BY DATE(ul.timestamp)
         ) daily_counts
       `,
+      // Average daily active users EXCLUDING weekends and holidays
+      prisma.$queryRaw<Array<{ avg_users: number }>>`
+        SELECT COALESCE(AVG(user_count), 0)::float as avg_users
+        FROM (
+          SELECT DATE(ul.timestamp) as log_date, COUNT(DISTINCT ul.user_id) as user_count
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE u.loginid != 'anonymous'
+            AND ul.timestamp >= NOW() - INTERVAL '30 days'
+            AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)  -- Exclude Sunday (0) and Saturday (6)
+            AND NOT EXISTS (
+              SELECT 1 FROM holidays h
+              WHERE h.date = DATE(ul.timestamp)
+            )
+          GROUP BY DATE(ul.timestamp)
+        ) daily_counts
+      `,
     ]);
     const uniqueTotalUsers = Number(uniqueUsersResult[0]?.count || 0);
     const avgDailyActive = Math.round(avgDailyActiveResult[0]?.avg_users || 0);
+    const avgDailyActiveExcluding = Math.round(avgDailyActiveExcludingResult[0]?.avg_users || 0);
 
     const totals = {
       totalServices: services.length,
       totalUsers: uniqueTotalUsers,  // Deduplicated across all services
       avgDailyActiveUsers: avgDailyActive,  // Deduplicated daily active users
+      avgDailyActiveUsersExcluding: avgDailyActiveExcluding,  // Excluding weekends & holidays
       totalRequests: serviceStats.reduce((sum, s) => sum + s.todayRequests, 0),
       totalTokens: serviceStats.reduce((sum, s) => sum + Number(s.totalTokens), 0),
     };

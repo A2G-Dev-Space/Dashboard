@@ -1,6 +1,6 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BookOpen, BarChart3, Home, Layers } from 'lucide-react';
+import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BookOpen, BarChart3, Home, Layers, CalendarDays } from 'lucide-react';
 import { serviceApi } from '../services/api';
 
 interface User {
@@ -110,6 +110,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
   const getCurrentPageLabel = () => {
     if (location.pathname === '/') return '통합 대시보드';
     if (location.pathname === '/users') return '사용자 관리';
+    if (location.pathname === '/holidays') return '휴일 관리';
     if (location.pathname === '/my-usage') return '내 사용량';
     if (location.pathname === '/feedback') return '피드백';
     if (location.pathname.startsWith('/service/')) {
@@ -195,6 +196,22 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
                   <Users className={`w-5 h-5 ${location.pathname === '/users' ? 'text-samsung-blue' : 'text-pastel-400 group-hover:text-pastel-600'}`} />
                   <span className="font-medium">사용자 관리</span>
                   {location.pathname === '/users' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
+                </Link>
+              )}
+              {/* SUPER_ADMIN만 휴일 관리 */}
+              {adminRole === 'SUPER_ADMIN' && (
+                <Link
+                  to="/holidays"
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all duration-200 group ${
+                    location.pathname === '/holidays'
+                      ? 'bg-pastel-100 text-pastel-700 shadow-sm'
+                      : 'text-pastel-600 hover:bg-pastel-50 hover:text-pastel-700'
+                  }`}
+                >
+                  <CalendarDays className={`w-5 h-5 ${location.pathname === '/holidays' ? 'text-samsung-blue' : 'text-pastel-400 group-hover:text-pastel-600'}`} />
+                  <span className="font-medium">휴일 관리</span>
+                  {location.pathname === '/holidays' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
                 </Link>
               )}
             </div>

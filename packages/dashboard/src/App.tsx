@@ -9,6 +9,7 @@ import UnifiedUsers from './pages/UnifiedUsers';
 import Feedback from './pages/Feedback';
 import MyUsage from './pages/MyUsage';
 import Login from './pages/Login';
+import Holidays from './pages/Holidays';
 import { authApi } from './services/api';
 
 interface User {
@@ -113,6 +114,11 @@ function App() {
             {/* 통합 사용자 관리 (SUPER_ADMIN만) */}
             {adminRole === 'SUPER_ADMIN' && (
               <Route path="/users" element={<UnifiedUsers />} />
+            )}
+
+            {/* 휴일 관리 (SUPER_ADMIN만) */}
+            {adminRole === 'SUPER_ADMIN' && (
+              <Route path="/holidays" element={<Holidays />} />
             )}
 
             {/* 서비스별 라우트 */}

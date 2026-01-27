@@ -276,6 +276,27 @@ model FeedbackComment {
 }
 
 // ============================================
+// 휴일 관리 (주말/휴일 제외 DAU 계산용)
+// ============================================
+enum HolidayType {
+  NATIONAL        // 국경일/공휴일
+  COMPANY         // 회사 휴일
+  CUSTOM          // 사용자 정의
+}
+
+model Holiday {
+  id        String      @id @default(uuid())
+  date      DateTime    @db.Date @unique
+  name      String                          // 휴일 이름 (예: "설날", "추석")
+  type      HolidayType @default(NATIONAL)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  @@index([date])
+  @@map("holidays")
+}
+
+// ============================================
 // 모델 평점 피드백 (1-5점)
 // ============================================
 model RatingFeedback {
