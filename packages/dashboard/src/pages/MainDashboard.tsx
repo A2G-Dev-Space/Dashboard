@@ -515,7 +515,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             <div>
               <p className="text-sm font-medium text-gray-500">DAU (주말/휴일 제외)</p>
               <p className="text-2xl font-bold text-orange-600 mt-1">{formatNumber(Math.round(avgDailyActiveExcluding))}</p>
-              <p className="text-xs text-gray-400 mt-1">영업일 기준 평균</p>
+              <p className="text-xs text-gray-400 mt-1">최근 한달 영업일 평균</p>
             </div>
             <div className="p-3 rounded-xl bg-orange-50">
               <Activity className="w-5 h-5 text-orange-500" />

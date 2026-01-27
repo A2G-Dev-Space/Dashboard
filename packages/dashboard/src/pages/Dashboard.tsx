@@ -112,7 +112,7 @@ export default function Dashboard({ serviceId }: DashboardProps) {
       icon: Activity,
       color: 'bg-orange-500',
       bgLight: 'bg-orange-50',
-      description: '주말/휴일 제외',
+      description: '최근 한달, 주말/휴일 제외',
       highlight: true,
     },
     {
