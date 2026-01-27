@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock, Star } from 'lucide-react';
 import { statsApi, serviceApi, ratingApi } from '../services/api';
+import WeeklyBusinessDAUChart from '../components/Charts/WeeklyBusinessDAUChart';
 
 type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
@@ -727,6 +728,9 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
           </div>
         </div>
       )}
+
+      {/* Weekly Business DAU Chart */}
+      <WeeklyBusinessDAUChart />
 
       {/* 1. Department Users Chart (Cumulative Line + Active Bar) */}
       {deptUsersDailyData.length > 0 && (

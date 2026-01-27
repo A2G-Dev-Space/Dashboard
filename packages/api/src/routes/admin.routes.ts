@@ -1548,6 +1548,105 @@ adminRoutes.get('/stats/global/by-service', async (req: AuthenticatedRequest, re
 });
 
 /**
+ * GET /admin/stats/weekly-business-dau
+ * 서비스별 주간 평균 영업일 DAU (주말/휴일 제외)
+ * Query: ?days= (14-365, default 90), ?weeks= (override days to calculate weeks)
+ * Returns weekly average DAU for each service, excluding weekends and holidays
+ */
+adminRoutes.get('/stats/weekly-business-dau', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 90));
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get all enabled services
+    const services = await prisma.service.findMany({
+      where: { enabled: true },
+      select: { id: true, name: true, displayName: true },
+    });
+
+    // Get weekly business day DAU for each service
+    // Week is defined as ISO week (Monday to Sunday)
+    const weeklyStats = await prisma.$queryRaw<
+      Array<{
+        service_id: string;
+        week_start: Date;
+        avg_daily_users: number;
+        business_days: bigint;
+      }>
+    >`
+      WITH business_day_users AS (
+        SELECT
+          ul.service_id::text as service_id,
+          DATE(ul.timestamp) as log_date,
+          DATE_TRUNC('week', ul.timestamp)::date as week_start,
+          COUNT(DISTINCT ul.user_id) as user_count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE ul.timestamp >= ${startDate}
+          AND u.loginid != 'anonymous'
+          AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
+          AND NOT EXISTS (
+            SELECT 1 FROM holidays h
+            WHERE h.date = DATE(ul.timestamp)
+          )
+        GROUP BY ul.service_id, DATE(ul.timestamp), DATE_TRUNC('week', ul.timestamp)
+      )
+      SELECT
+        service_id,
+        week_start,
+        COALESCE(AVG(user_count), 0)::float as avg_daily_users,
+        COUNT(DISTINCT log_date) as business_days
+      FROM business_day_users
+      GROUP BY service_id, week_start
+      ORDER BY week_start ASC, service_id
+    `;
+
+    // Process into chart data format
+    const weekMap = new Map<string, Record<string, number>>();
+    const serviceIds = services.map((s) => s.id);
+
+    // Initialize weeks with all services set to 0
+    for (const stat of weeklyStats) {
+      const weekStr = formatDateToString(stat.week_start);
+      if (!weekMap.has(weekStr)) {
+        const initialData: Record<string, number> = {};
+        for (const serviceId of serviceIds) {
+          initialData[serviceId] = 0;
+        }
+        weekMap.set(weekStr, initialData);
+      }
+    }
+
+    // Fill in actual data
+    for (const stat of weeklyStats) {
+      const weekStr = formatDateToString(stat.week_start);
+      const existing = weekMap.get(weekStr);
+      if (existing && serviceIds.includes(stat.service_id)) {
+        existing[stat.service_id] = Math.round(stat.avg_daily_users);
+      }
+    }
+
+    // Convert to array format sorted by date
+    const chartData = Array.from(weekMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([week, serviceUsage]) => ({
+        week,
+        ...serviceUsage,
+      }));
+
+    res.json({
+      services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
+      chartData,
+    });
+  } catch (error) {
+    console.error('Get weekly business DAU error:', error);
+    res.status(500).json({ error: 'Failed to get weekly business DAU' });
+  }
+});
+
+/**
  * GET /admin/stats/global/by-dept
  * 사업부별 통합 통계 (Main Dashboard용)
  * Query: ?days= (30), ?serviceId= (optional)
