@@ -19,8 +19,16 @@ const services = [
     enabled: false, // Coming Soon
   },
   {
+    id: 'aipo-web',
+    name: 'AIPO for Web',
+    description: 'AI 자동 노트 정리 서비스',
+    basePath: '/aipo-web',
+    icon: '📝',
+    enabled: true,
+  },
+  {
     id: 'aipo',
-    name: 'Aipo',
+    name: 'AIPO for Desktop',
     description: 'Smart Posting App',
     basePath: '/aipo',
     icon: '✨',
@@ -110,6 +118,31 @@ export default defineConfig({
             { text: 'Vibe Coding React', link: '/demos/vibe-coding-react' },
             { text: 'Office Automation', link: '/demos/office-automation' },
             { text: 'Git Automation', link: '/demos/git-automation' },
+          ]
+        }
+      ],
+      '/aipo-web/': [
+        {
+          text: '📝 AIPO for Web',
+          collapsed: false,
+          items: [
+            { text: 'Overview', link: '/aipo-web/' },
+            {
+              text: 'Guide',
+              items: [
+                { text: '시작하기', link: '/aipo-web/guide/getting-started' },
+                { text: '기본 사용법', link: '/aipo-web/guide/basic-usage' },
+                { text: '팀 협업', link: '/aipo-web/guide/collaboration' },
+                { text: '고급 기능', link: '/aipo-web/guide/advanced' },
+              ]
+            },
+            {
+              text: 'Reference',
+              items: [
+                { text: 'API 문서', link: '/aipo-web/api-reference' },
+                { text: 'FAQ', link: '/aipo-web/faq' },
+              ]
+            }
           ]
         }
       ]
