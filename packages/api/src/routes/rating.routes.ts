@@ -31,14 +31,17 @@ ratingRoutes.post('/', async (req, res) => {
       return;
     }
 
-    // serviceId가 제공된 경우 UUID 또는 서비스명으로 조회
+    // serviceId 결정 우선순위: body.serviceId → X-Service-Id 헤더 → modelName 추론
     let resolvedServiceId: string | null = null;
-    if (serviceId) {
+
+    // 1) body에서 serviceId 제공된 경우
+    const serviceIdSource = serviceId || (req.headers['x-service-id'] as string | undefined);
+    if (serviceIdSource) {
       const service = await prisma.service.findFirst({
         where: {
           OR: [
-            { id: serviceId },
-            { name: serviceId },
+            { id: serviceIdSource },
+            { name: serviceIdSource },
           ],
         },
         select: { id: true },
@@ -46,7 +49,7 @@ ratingRoutes.post('/', async (req, res) => {
       resolvedServiceId = service?.id || null;
     }
 
-    // serviceId가 없거나 resolve 실패 시, modelName으로 서비스 추론 (best-effort)
+    // 2) serviceId가 없거나 resolve 실패 시, modelName으로 서비스 추론 (best-effort)
     if (!resolvedServiceId) {
       const inferredModel = await prisma.model.findFirst({
         where: { name: modelName, enabled: true },
@@ -55,6 +58,11 @@ ratingRoutes.post('/', async (req, res) => {
       if (inferredModel?.serviceId) {
         resolvedServiceId = inferredModel.serviceId;
       }
+    }
+
+    // 경고: serviceId를 어떤 방법으로도 특정할 수 없는 경우
+    if (!resolvedServiceId) {
+      console.warn(`[Rating] ⚠️ Could not resolve serviceId: modelName=${modelName}, serviceId=${serviceId || 'none'}, header=${req.headers['x-service-id'] || 'none'}`);
     }
 
     // 평점 저장 (serviceId 포함)

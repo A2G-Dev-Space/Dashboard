@@ -76,7 +76,11 @@ async function getServiceIdFromRequest(req: Request): Promise<{ serviceId: strin
     return { serviceId: null, error: `Service '${serviceHeader}' is not registered. Please contact admin to register your service.` };
   }
 
-  // 헤더가 없는 경우 기본 서비스 사용 (null → nexus-coder)
+  // 헤더가 없는 경우 경고 로그 + 기본 서비스(nexus-coder) 폴백
+  // TODO: 추후 X-Service-Id 헤더 필수화 예정 → error 반환으로 전환
+  const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+  const path = req.originalUrl || req.url;
+  console.warn(`[Service] ⚠️ Missing X-Service-Id header: user=${loginid}, path=${path} → defaulting to '${DEFAULT_SERVICE_NAME}'`);
   const defaultServiceId = await getDefaultServiceId();
   return { serviceId: defaultServiceId, error: null };
 }
