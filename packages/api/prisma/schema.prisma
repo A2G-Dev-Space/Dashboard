@@ -89,6 +89,9 @@ model Model {
   createdAt   DateTime @default(now())
   createdBy   String?
 
+  // 사업부 제한 (빈 배열 = 제한 없음, 모든 사업부 허용)
+  allowedBusinessUnits String[] @default([]) @map("allowed_business_units")
+
   // 서비스 연결 (nullable for migration, then required)
   serviceId   String?  @map("service_id")
   service     Service? @relation(fields: [serviceId], references: [id])

@@ -254,6 +254,7 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
         displayName: true,
         maxTokens: true,
         sortOrder: true,
+        allowedBusinessUnits: true,
         service: {
           select: {
             name: true,
@@ -266,10 +267,27 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
       ],
     });
 
+    // 사업부 제한 필터링: X-User-Dept 헤더에서 businessUnit 추출
+    const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
+    const businessUnit = extractBusinessUnit(deptname);
+    const hasRestricted = models.some((m) => m.allowedBusinessUnits.length > 0);
+
+    let filtered = models;
+    if (hasRestricted && !businessUnit) {
+      // X-User-Dept 헤더 없이 호출 → 경고 로그만 남기고 전체 반환
+      const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+      const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+      console.warn(`[BU-Filter] GET /v1/models called without X-User-Dept header: user=${loginid}, service=${serviceHeader}`);
+    } else if (businessUnit) {
+      filtered = models.filter(
+        (m) => m.allowedBusinessUnits.length === 0 || m.allowedBusinessUnits.includes(businessUnit)
+      );
+    }
+
     // OpenAI-compatible format
     res.json({
       object: 'list',
-      data: models.map(model => ({
+      data: filtered.map(model => ({
         id: model.name,
         object: 'model',
         created: Date.now(),
@@ -318,6 +336,20 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     if (!model) {
       res.status(404).json({ error: `Model '${modelName}' not found or disabled` });
       return;
+    }
+
+    // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
+    if (model.allowedBusinessUnits.length > 0) {
+      const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
+      const userBU = extractBusinessUnit(deptname);
+      if (!userBU) {
+        const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+        const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+        console.warn(`[BU-Filter] POST /v1/chat/completions called without X-User-Dept header: user=${loginid}, service=${serviceHeader}, model=${modelName}, allowedBU=[${model.allowedBusinessUnits.join(',')}]`);
+      } else if (!model.allowedBusinessUnits.includes(userBU)) {
+        res.status(403).json({ error: `Model '${modelName}' is not available for your business unit (${userBU})` });
+        return;
+      }
     }
 
     // Get or create user for usage tracking
@@ -782,6 +814,7 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
         name: true,
         displayName: true,
         maxTokens: true,
+        allowedBusinessUnits: true,
         service: {
           select: {
             name: true,
@@ -793,6 +826,20 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
     if (!model) {
       res.status(404).json({ error: 'Model not found' });
       return;
+    }
+
+    // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
+    if (model.allowedBusinessUnits.length > 0) {
+      const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
+      const userBU = extractBusinessUnit(deptname);
+      if (!userBU) {
+        const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+        const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+        console.warn(`[BU-Filter] GET /v1/models/${modelName} called without X-User-Dept header: user=${loginid}, service=${serviceHeader}, allowedBU=[${model.allowedBusinessUnits.join(',')}]`);
+      } else if (!model.allowedBusinessUnits.includes(userBU)) {
+        res.status(403).json({ error: `Model '${modelName}' is not available for your business unit (${userBU})` });
+        return;
+      }
     }
 
     res.json({

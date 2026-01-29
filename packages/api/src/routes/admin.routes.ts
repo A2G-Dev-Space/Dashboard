@@ -47,6 +47,7 @@ const modelSchema = z.object({
   maxTokens: z.number().int().min(1).max(1000000).default(128000),
   enabled: z.boolean().default(true),
   serviceId: z.string().uuid().optional(),
+  allowedBusinessUnits: z.array(z.string()).optional(),
 });
 
 /**
@@ -55,9 +56,7 @@ const modelSchema = z.object({
  * Query: ?serviceId= (optional)
  * - SUPER_ADMIN/VIEWER: all models or filtered by serviceId
  * - SERVICE_ADMIN/SERVICE_VIEWER: only models from assigned services
- * When serviceId is provided, returns both:
- * - Models registered to that service (model.serviceId)
- * - Models that have been USED by that service (from usage_logs)
+ * When serviceId is provided, returns models registered to that service (model.serviceId)
  */
 adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
   try {
@@ -67,7 +66,7 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
     const accessibleServiceIds = await getAccessibleServiceIds(req);
 
     // Build where clause
-    let whereClause: { serviceId?: string | { in: string[] }; id?: { in: string[] } } = {};
+    let whereClause: { serviceId?: string | { in: string[] } } = {};
 
     if (serviceId) {
       // If specific serviceId requested, check access
@@ -76,23 +75,8 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
         return;
       }
 
-      // Get models that have been USED by this service (from usage_logs)
-      const usedModels = await prisma.$queryRaw<Array<{ model_id: string }>>`
-        SELECT DISTINCT model_id
-        FROM usage_logs
-        WHERE service_id::text = ${serviceId}
-      `;
-      const usedModelIds = usedModels.map((m) => m.model_id);
-
-      // Combine: models registered to this service OR models used by this service
-      whereClause = {
-        id: { in: usedModelIds },
-      };
-
-      // If no usage records, fall back to models registered to this service
-      if (usedModelIds.length === 0) {
-        whereClause = { serviceId };
-      }
+      // Filter by model's serviceId FK (not usage_logs)
+      whereClause = { serviceId };
     } else if (accessibleServiceIds !== null) {
       // Filter to accessible services only
       whereClause = { serviceId: { in: accessibleServiceIds } };
@@ -328,6 +312,28 @@ adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
   } catch (error) {
     console.error('Delete model error:', error);
     res.status(500).json({ error: 'Failed to delete model' });
+  }
+});
+
+/**
+ * GET /admin/business-units
+ * Get distinct business units from users table
+ */
+adminRoutes.get('/business-units', async (_req: AuthenticatedRequest, res) => {
+  try {
+    const units = await prisma.user.findMany({
+      where: {
+        businessUnit: { not: null },
+        NOT: { businessUnit: '' },
+      },
+      select: { businessUnit: true },
+      distinct: ['businessUnit'],
+      orderBy: { businessUnit: 'asc' },
+    });
+    res.json({ businessUnits: units.map((u) => u.businessUnit).filter(Boolean) });
+  } catch (error) {
+    console.error('Get business units error:', error);
+    res.status(500).json({ error: 'Failed to get business units' });
   }
 });
 

@@ -61,6 +61,7 @@ export const modelsApi = {
   update: (id: string, data: Partial<CreateModelData>) => api.put(`/admin/models/${id}`, data),
   delete: (id: string, force = false) => api.delete(`/admin/models/${id}`, { params: { force } }),
   reorder: (modelIds: string[]) => api.put('/admin/models/reorder', { modelIds }),
+  businessUnits: () => api.get('/admin/business-units'),
 };
 
 export const usersApi = {
@@ -173,6 +174,7 @@ interface CreateModelData {
   maxTokens?: number;
   enabled?: boolean;
   serviceId?: string;
+  allowedBusinessUnits?: string[];
 }
 
 interface CreateServiceData {

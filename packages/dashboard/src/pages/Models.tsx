@@ -15,6 +15,7 @@ interface Model {
   creator?: { loginid: string };
   serviceId?: string;
   service?: { id: string; name: string; displayName: string };
+  allowedBusinessUnits?: string[];
 }
 
 interface ServiceInfo {
@@ -222,6 +223,9 @@ export default function Models({ serviceId }: ModelsProps) {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                사업부 제한
+              </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
@@ -288,6 +292,22 @@ export default function Models({ serviceId }: ModelsProps) {
                     )}
                   </button>
                 </td>
+                <td className="px-6 py-4">
+                  {model.allowedBusinessUnits && model.allowedBusinessUnits.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {model.allowedBusinessUnits.map((bu) => (
+                        <span
+                          key={bu}
+                          className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full"
+                        >
+                          {bu}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400">전체 허용</span>
+                  )}
+                </td>
                 <td className="px-6 py-4 text-right">
                   <button
                     onClick={() => handleEdit(model)}
@@ -308,7 +328,7 @@ export default function Models({ serviceId }: ModelsProps) {
             ))}
             {models.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                   No models configured. Click "Add Model" to create one.
                 </td>
               </tr>
@@ -349,9 +369,28 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     maxTokens: model?.maxTokens || 128000,
     enabled: model?.enabled ?? true,
     serviceId: model?.serviceId || serviceId || '',
+    allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [businessUnits, setBusinessUnits] = useState<string[]>([]);
+  const [buLoading, setBuLoading] = useState(true);
+
+  useEffect(() => {
+    modelsApi.businessUnits()
+      .then((res) => setBusinessUnits(res.data.businessUnits))
+      .catch((err) => console.error('Failed to load business units:', err))
+      .finally(() => setBuLoading(false));
+  }, []);
+
+  const toggleBusinessUnit = (bu: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      allowedBusinessUnits: prev.allowedBusinessUnits.includes(bu)
+        ? prev.allowedBusinessUnits.filter((b) => b !== bu)
+        : [...prev.allowedBusinessUnits, bu],
+    }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -381,7 +420,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
             {model ? 'Edit Model' : 'Add Model'}
@@ -469,6 +508,64 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
             <label htmlFor="enabled" className="text-sm text-gray-700">
               Enable this model
             </label>
+          </div>
+
+          {/* 사업부 제한 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              사업부 제한
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              선택하지 않으면 모든 사업부에서 사용 가능합니다.
+            </p>
+            {buLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-transparent"></div>
+                로딩 중...
+              </div>
+            ) : businessUnits.length === 0 ? (
+              <p className="text-sm text-gray-400">등록된 사업부가 없습니다.</p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto space-y-1">
+                {businessUnits.map((bu) => (
+                  <label key={bu} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                    <input
+                      type="checkbox"
+                      checked={formData.allowedBusinessUnits.includes(bu)}
+                      onChange={() => toggleBusinessUnit(bu)}
+                      className="w-4 h-4 text-samsung-blue rounded focus:ring-samsung-blue"
+                    />
+                    <span className="text-sm text-gray-700">{bu}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {formData.allowedBusinessUnits.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {formData.allowedBusinessUnits.map((bu) => (
+                  <span
+                    key={bu}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full"
+                  >
+                    {bu}
+                    <button
+                      type="button"
+                      onClick={() => toggleBusinessUnit(bu)}
+                      className="hover:text-amber-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, allowedBusinessUnits: [] })}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline ml-1"
+                >
+                  전체 해제
+                </button>
+              </div>
+            )}
           </div>
 
           {error && (

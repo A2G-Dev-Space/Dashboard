@@ -12,14 +12,29 @@ export const modelsRoutes = Router();
 /**
  * GET /models
  * List all models
+ * Query: ?businessUnit= (optional) - 사업부 필터링. 설정된 경우 해당 사업부가 허용된 모델만 반환
+ *        ?serviceId= (optional) - 서비스 필터링
  */
-modelsRoutes.get('/', async (_req, res) => {
+modelsRoutes.get('/', async (req, res) => {
   try {
+    const businessUnit = req.query['businessUnit'] as string | undefined;
+    const serviceId = req.query['serviceId'] as string | undefined;
+
     const models = await prisma.model.findMany({
+      where: {
+        ...(serviceId && { serviceId }),
+      },
       orderBy: { displayName: 'asc' },
     });
 
-    res.json({ models });
+    // 사업부 필터링: allowedBusinessUnits가 빈 배열이면 제한 없음, 아니면 해당 사업부 포함 여부 확인
+    const filtered = businessUnit
+      ? models.filter(
+          (m) => m.allowedBusinessUnits.length === 0 || m.allowedBusinessUnits.includes(businessUnit)
+        )
+      : models;
+
+    res.json({ models: filtered });
   } catch (error) {
     console.error('List models error:', error);
     res.status(500).json({ error: 'Failed to list models' });
