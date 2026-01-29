@@ -85,6 +85,6 @@ SSO 로그인 정보에서 팀명이 자동으로 추출됩니다.
 
 ## 다음 단계
 
-- [기본 사용법](/aipo-web/guide/basic-usage) — 노트 작성, 검색, 관리
-- [팀 협업](/aipo-web/guide/collaboration) — 팀 공간 활용법
-- [고급 기능](/aipo-web/guide/advanced) — 히스토리, 내보내기, 관리자 기능
+- [기본 사용법](/once/guide/basic-usage) — 노트 작성, 검색, 관리
+- [팀 협업](/once/guide/collaboration) — 팀 공간 활용법
+- [고급 기능](/once/guide/advanced) — 히스토리, 내보내기, 관리자 기능

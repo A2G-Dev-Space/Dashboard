@@ -8,7 +8,7 @@ hero:
   actions:
     - theme: brand
       text: 시작하기
-      link: /aipo-web/guide/getting-started
+      link: /once/guide/getting-started
     - theme: alt
       text: ← 서비스 목록으로
       link: /

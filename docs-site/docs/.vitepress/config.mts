@@ -19,10 +19,10 @@ const services = [
     enabled: true,
   },
   {
-    id: 'aipo-web',
+    id: 'once',
     name: 'ONCE',
     description: '자동 지식 저장/공유 시스템',
-    basePath: '/aipo-web',
+    basePath: '/once',
     icon: '📝',
     enabled: true,
   },
@@ -113,25 +113,25 @@ export default defineConfig({
           ]
         }
       ],
-      '/aipo-web/': [
+      '/once/': [
         {
           text: '📝 ONCE',
           collapsed: false,
           items: [
-            { text: 'Overview', link: '/aipo-web/' },
+            { text: 'Overview', link: '/once/' },
             {
               text: 'Guide',
               items: [
-                { text: '시작하기', link: '/aipo-web/guide/getting-started' },
-                { text: '기본 사용법', link: '/aipo-web/guide/basic-usage' },
-                { text: '팀 협업', link: '/aipo-web/guide/collaboration' },
-                { text: '고급 기능', link: '/aipo-web/guide/advanced' },
+                { text: '시작하기', link: '/once/guide/getting-started' },
+                { text: '기본 사용법', link: '/once/guide/basic-usage' },
+                { text: '팀 협업', link: '/once/guide/collaboration' },
+                { text: '고급 기능', link: '/once/guide/advanced' },
               ]
             },
             {
               text: 'Reference',
               items: [
-                { text: 'FAQ', link: '/aipo-web/faq' },
+                { text: 'FAQ', link: '/once/faq' },
               ]
             }
           ]
