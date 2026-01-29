@@ -20,19 +20,11 @@ const services = [
   },
   {
     id: 'aipo-web',
-    name: 'AIPO for Web',
-    description: 'AI 자동 노트 정리 서비스',
+    name: 'AIPO',
+    description: '자동 지식 저장/공유 시스템',
     basePath: '/aipo-web',
     icon: '📝',
     enabled: true,
-  },
-  {
-    id: 'aipo',
-    name: 'AIPO for Desktop',
-    description: 'Smart Posting App',
-    basePath: '/aipo',
-    icon: '✨',
-    enabled: false, // Coming Soon
   },
 ]
 
@@ -139,7 +131,6 @@ export default defineConfig({
             {
               text: 'Reference',
               items: [
-                { text: 'API 문서', link: '/aipo-web/api-reference' },
                 { text: 'FAQ', link: '/aipo-web/faq' },
               ]
             }
