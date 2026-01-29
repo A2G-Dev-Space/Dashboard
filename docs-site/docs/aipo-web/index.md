@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "ONCE"
-  text: "사람의 간섭이 전혀 없는 자동 지식 저장/공유 시스템"
+  text: "Organized Notes Categorized Effortlessly"
   tagline: 아무거나 입력하면 AI가 알아서 정리하고, 팀에게 공유합니다
   actions:
     - theme: brand

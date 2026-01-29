@@ -54,7 +54,7 @@ const services = [
   },
   {
     name: 'ONCE',
-    tagline: 'Smart Posting App',
+    tagline: 'Organized Notes Categorized Effortlessly',
     desc: '문서 작성, 요약, 번역 등 개인 업무 효율화를 위한 AI 도구',
     icon: '✨',
     tags: ['Productivity', 'Writing'],
