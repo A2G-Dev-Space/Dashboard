@@ -3,8 +3,8 @@
 # 실행: ./packages/api/scripts/cleanup-services.sh
 
 CONTAINER="dashboard-db"
-DB_USER="nexuscoder"
-DB_NAME="nexuscoder"
+DB_USER="ax"
+DB_NAME="axdashboard"
 
 docker exec -i "$CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" <<'SQL'
 \echo '=== 삭제 대상 서비스 ==='
