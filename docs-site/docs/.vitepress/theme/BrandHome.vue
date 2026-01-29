@@ -44,12 +44,12 @@ const services = [
   },
   {
     name: 'Nexus Coder for Windows',
-    tagline: 'Native Windows Support',
-    desc: 'WSL 없이 Windows 환경에서 직접 사용 가능한 Coding Agent',
+    tagline: 'Native Windows Coding Agent',
+    desc: 'WSL 없이 Windows에서 설치 파일로 바로 사용하는 GUI 기반 AI Coding Agent',
     icon: '💻',
-    tags: ['Windows', 'Native'],
+    tags: ['Windows', 'Native', 'GUI'],
     link: '/docs/nexus-coder-windows',
-    status: 'coming',
+    status: 'available',
     featured: false,
   },
   {

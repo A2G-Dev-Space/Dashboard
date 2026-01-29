@@ -16,7 +16,7 @@ const services = [
     description: 'Vibe Coding Tool for Windows',
     basePath: '/nexus-coder-windows',
     icon: '💻',
-    enabled: false, // Coming Soon
+    enabled: true,
   },
   {
     id: 'aipo-web',
@@ -136,18 +136,33 @@ export default defineConfig({
             }
           ]
         }
+      ],
+      '/guide-windows/': [
+        {
+          text: '💻 Nexus Coder for Windows',
+          collapsed: false,
+          items: [
+            {
+              text: 'Introduction',
+              items: [
+                { text: 'Getting Started', link: '/guide-windows/getting-started' },
+              ]
+            },
+            {
+              text: 'Usage',
+              items: [
+                { text: 'Basic Usage', link: '/guide-windows/basic-usage' },
+              ]
+            },
+            {
+              text: 'Reference',
+              items: [
+                { text: 'FAQ', link: '/guide-windows/faq' },
+              ]
+            }
+          ]
+        }
       ]
-      // 새 서비스 사이드바 예시 (추가 시 주석 해제)
-      // '/other-service/': [
-      //   {
-      //     text: '🔧 Other Service',
-      //     collapsed: false,
-      //     items: [
-      //       { text: 'Overview', link: '/other-service/' },
-      //       { text: 'Getting Started', link: '/other-service/guide/getting-started' },
-      //     ]
-      //   }
-      // ]
     },
 
     socialLinks: [
