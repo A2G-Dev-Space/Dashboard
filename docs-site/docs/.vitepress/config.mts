@@ -20,7 +20,7 @@ const services = [
   },
   {
     id: 'aipo-web',
-    name: 'AIPO',
+    name: 'ONCE',
     description: '자동 지식 저장/공유 시스템',
     basePath: '/aipo-web',
     icon: '📝',
@@ -115,7 +115,7 @@ export default defineConfig({
       ],
       '/aipo-web/': [
         {
-          text: '📝 AIPO for Web',
+          text: '📝 ONCE',
           collapsed: false,
           items: [
             { text: 'Overview', link: '/aipo-web/' },
