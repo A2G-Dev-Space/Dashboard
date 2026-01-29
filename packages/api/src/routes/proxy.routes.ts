@@ -322,16 +322,35 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
       return;
     }
 
-    // Find model in database
-    const model = await prisma.model.findFirst({
-      where: {
-        OR: [
-          { name: modelName },
-          { id: modelName },
-        ],
-        enabled: true,
-      },
-    });
+    // Resolve service ID FIRST (서비스별 모델 구분을 위해 모델 조회 전에 수행)
+    const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
+
+    // Reject requests from unregistered services
+    if (serviceError) {
+      res.status(403).json({ error: serviceError });
+      return;
+    }
+
+    // Find model in database (서비스 우선 조회 → 폴백)
+    // 같은 이름의 모델이 여러 서비스에 등록될 수 있으므로, 요청 서비스의 모델을 우선 탐색
+    let model = serviceId
+      ? await prisma.model.findFirst({
+          where: { name: modelName, serviceId, enabled: true },
+        })
+      : null;
+
+    // 폴백: 서비스 특정 모델이 없으면 이름 또는 UUID로 전체 검색 (하위 호환)
+    if (!model) {
+      model = await prisma.model.findFirst({
+        where: {
+          OR: [
+            { name: modelName },
+            { id: modelName },
+          ],
+          enabled: true,
+        },
+      });
+    }
 
     if (!model) {
       res.status(404).json({ error: `Model '${modelName}' not found or disabled` });
@@ -354,15 +373,6 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
 
     // Get or create user for usage tracking
     const user = await getOrCreateUser(req);
-
-    // Get service ID from header or use default
-    const { serviceId, error: serviceError } = await getServiceIdFromRequest(req);
-
-    // Reject requests from unregistered services
-    if (serviceError) {
-      res.status(403).json({ error: serviceError });
-      return;
-    }
 
     // Prepare request to actual LLM
     const llmRequestBody = {

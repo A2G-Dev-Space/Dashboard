@@ -46,6 +46,17 @@ ratingRoutes.post('/', async (req, res) => {
       resolvedServiceId = service?.id || null;
     }
 
+    // serviceId가 없거나 resolve 실패 시, modelName으로 서비스 추론 (best-effort)
+    if (!resolvedServiceId) {
+      const inferredModel = await prisma.model.findFirst({
+        where: { name: modelName, enabled: true },
+        select: { serviceId: true },
+      });
+      if (inferredModel?.serviceId) {
+        resolvedServiceId = inferredModel.serviceId;
+      }
+    }
+
     // 평점 저장 (serviceId 포함)
     const feedback = await prisma.ratingFeedback.create({
       data: {
