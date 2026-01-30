@@ -54,7 +54,7 @@ const services = [
   },
   {
     name: 'ONCE',
-    tagline: '한번만 입력하세요, 알아서 정리해 드릴게요',
+    tagline: '한번만 입력하세요,<br>알아서 정리해 드릴게요',
     desc: 'AI powered 노트 · 지식 · 할일관리',
     icon: '✨',
     tags: ['Productivity', 'Writing'],
@@ -64,7 +64,7 @@ const services = [
   },
   {
     name: 'FREE',
-    tagline: '주간 보고 취합에서 해방되세요, 알아서 취합해 드릴게요',
+    tagline: '주간 보고 취합에서 해방되세요,<br>알아서 취합해 드릴게요',
     desc: 'AI powered 주간보고 취합',
     icon: '📊',
     tags: ['Report', 'Automation', 'Team'],
@@ -135,7 +135,7 @@ const services = [
             </div>
             <div class="service-icon">{{ service.icon }}</div>
             <h3>{{ service.name }}</h3>
-            <p class="service-tagline">{{ service.tagline }}</p>
+            <p class="service-tagline" v-html="service.tagline"></p>
             <p class="service-desc">{{ service.desc }}</p>
             <div class="service-tags">
               <span v-for="tag in service.tags" :key="tag">{{ tag }}</span>
