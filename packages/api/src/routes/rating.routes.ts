@@ -31,6 +31,9 @@ ratingRoutes.post('/', async (req, res) => {
       return;
     }
 
+    // 디버그: 수신 헤더 전체 로깅
+    console.log(`[Rating] POST / | body: ${JSON.stringify(req.body)} | headers: X-Service-Id=${req.headers['x-service-id'] || 'none'}, X-User-Id=${req.headers['x-user-id'] || 'none'}, X-User-Name=${req.headers['x-user-name'] || 'none'}, X-User-Dept=${req.headers['x-user-dept'] || 'none'}`);
+
     // serviceId 결정 우선순위: body.serviceId → X-Service-Id 헤더 → modelName 추론
     let resolvedServiceId: string | null = null;
 
@@ -59,6 +62,8 @@ ratingRoutes.post('/', async (req, res) => {
         resolvedServiceId = inferredModel.serviceId;
       }
     }
+
+    console.log(`[Rating] Resolved serviceId=${resolvedServiceId || 'NULL'} (source: ${serviceIdSource || 'none'}, inferred: ${!serviceIdSource && resolvedServiceId ? 'yes' : 'no'})`);
 
     // 경고: serviceId를 어떤 방법으로도 특정할 수 없는 경우
     if (!resolvedServiceId) {
