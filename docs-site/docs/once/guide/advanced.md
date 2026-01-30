@@ -92,6 +92,37 @@
 
 ---
 
+## Quick-add API
+
+외부 스크립트나 도구에서 ONCE 개인 공간에 메모를 추가할 수 있는 API입니다.
+
+### 사용법
+
+```bash
+curl -X POST http://a2g.samsungds.net:16001/api/quick-add \
+  -H "Content-Type: application/json" \
+  -d '{"id": "사번(loginid)", "input": "추가할 내용"}'
+```
+
+| 파라미터 | 설명 |
+|----------|------|
+| `id` | SSO 사번 (loginid) |
+| `input` | 추가할 메모 내용 |
+
+::: tip 활용 예시
+- CI/CD 파이프라인에서 빌드 결과 자동 저장
+- 슬랙 봇에서 메시지를 ONCE로 전달
+- 자동화 스크립트에서 일일 보고 생성
+:::
+
+::: warning 주의
+- 인증 없이 사용 가능하므로 **사내망에서만** 접근 가능합니다
+- `id`에 해당하는 사용자가 존재해야 합니다 (SSO 로그인 이력 필요)
+- 개인 공간에만 저장됩니다 (팀 공간 불가)
+:::
+
+---
+
 ## 관리자 도구
 
 ### Super Admin
