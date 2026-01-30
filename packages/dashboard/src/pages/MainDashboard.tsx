@@ -751,7 +751,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <h3 className="text-lg font-semibold text-gray-900">서비스 삭제</h3>
-              <button onClick={() => setDeleteTarget(null)} className="p-1 text-gray-400 hover:text-gray-600">
+              <button onClick={() => { if (!deleting) setDeleteTarget(null); }} className={`p-1 transition-colors ${deleting ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-gray-600'}`}>
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -769,7 +769,8 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                 <button
                   type="button"
                   onClick={() => setDeleteTarget(null)}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                  disabled={deleting}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
                 >
                   취소
                 </button>
