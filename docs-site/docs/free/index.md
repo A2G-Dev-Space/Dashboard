@@ -60,6 +60,13 @@ features:
 | 장애 대응 | "프로덕션 DB 커넥션 풀 이슈 해결, 타임아웃 설정 변경" |
 | 메신저 대화 | 업무 관련 대화 내용 그대로 붙여넣기 |
 
+## Nexus Coder 연동
+
+::: info Nexus Coder로 FREE를 관리하세요
+[Nexus Coder](/nexus-coder/) 또는 [Nexus Coder for Windows](/nexus-coder-windows/)에서 FREE에 업무 내용을 바로 입력할 수 있습니다.
+코딩 중 완료한 업무를 터미널에서 바로 FREE에 기록하면, 자정에 자동으로 보고서에 반영됩니다.
+:::
+
 ## 접속 방법
 
 ::: tip 접속 URL

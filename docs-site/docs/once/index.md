@@ -63,6 +63,13 @@ ONCE는 **모든 노트 작성/수정이 AI를 통해서만** 이루어집니다
 | 내용 검색 | "지난주 마케팅 회의에서 결정된 예산 관련 내용 찾아줘" |
 | 할일 자동 추출 | "다음주까지 보고서 제출해야 하고, 3월에 킥오프 미팅 있어" → AI가 Todo 자동 생성 |
 
+## Nexus Coder 연동
+
+::: info Nexus Coder로 ONCE를 관리하세요
+[Nexus Coder](/nexus-coder/) 또는 [Nexus Coder for Windows](/nexus-coder-windows/)에서 ONCE의 노트와 할일을 직접 관리할 수 있습니다.
+코딩하면서 떠오른 아이디어나 회의 내용을 터미널에서 바로 ONCE에 입력하세요.
+:::
+
 ## 접속 방법
 
 ::: tip 접속 URL

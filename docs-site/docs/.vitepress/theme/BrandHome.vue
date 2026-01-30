@@ -35,9 +35,9 @@ const services = [
   {
     name: 'Nexus Coder',
     tagline: 'Vibe Coding Tool for WSL',
-    desc: 'CLI 기반 AI Coding Agent로 코드 작성, 리팩토링, 디버깅을 AI와 함께',
+    desc: 'CLI 기반 AI Coding Agent로 코드 작성, 리팩토링, 디버깅을 AI와 함께. ONCE · FREE와 연동하여 노트 관리와 주간보고도 터미널에서 바로!',
     icon: '🚀',
-    tags: ['WSL', 'CLI', 'Coding Agent'],
+    tags: ['WSL', 'CLI', 'Coding Agent', 'ONCE 연동', 'FREE 연동'],
     link: '/docs/nexus-coder',
     status: 'available',
     featured: true,
@@ -45,9 +45,9 @@ const services = [
   {
     name: 'Nexus Coder for Windows',
     tagline: 'Native Windows Coding Agent',
-    desc: 'WSL 없이 Windows에서 설치 파일로 바로 사용하는 GUI 기반 AI Coding Agent',
+    desc: 'WSL 없이 Windows에서 설치 파일로 바로 사용하는 GUI 기반 AI Coding Agent. ONCE · FREE와 연동하여 노트 관리와 주간보고도 바로!',
     icon: '💻',
-    tags: ['Windows', 'Native', 'GUI'],
+    tags: ['Windows', 'Native', 'GUI', 'ONCE 연동', 'FREE 연동'],
     link: '/docs/nexus-coder-windows',
     status: 'available',
     featured: false,
