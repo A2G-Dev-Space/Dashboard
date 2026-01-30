@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "ONCE"
-  text: "Organized Notes Categorized Effortlessly"
-  tagline: "한번만 입력하면 모든걸 알아서! — 아무거나 입력하면 AI가 알아서 정리하고, 팀에게 공유합니다"
+  text: "한번만 입력하세요, 알아서 정리해 드릴게요"
+  tagline: "AI powered 노트 · 지식 · 할일관리"
   actions:
     - theme: brand
       text: 시작하기

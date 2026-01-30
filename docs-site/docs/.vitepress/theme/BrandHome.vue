@@ -54,8 +54,8 @@ const services = [
   },
   {
     name: 'ONCE',
-    tagline: 'Organized Notes Categorized Effortlessly',
-    desc: '문서 작성, 요약, 번역 등 개인 업무 효율화를 위한 AI 도구',
+    tagline: '한번만 입력하세요, 알아서 정리해 드릴게요',
+    desc: 'AI powered 노트 · 지식 · 할일관리',
     icon: '✨',
     tags: ['Productivity', 'Writing'],
     link: '/docs/once',
@@ -64,8 +64,8 @@ const services = [
   },
   {
     name: 'FREE',
-    tagline: 'Fast Report & Easy Evidence',
-    desc: '주간보고에서 해방! 업무 내용만 입력하면 AI가 팀 보고서를 자동 생성합니다.',
+    tagline: '주간 보고 취합에서 해방되세요, 알아서 취합해 드릴게요',
+    desc: 'AI powered 주간보고 취합',
     icon: '📊',
     tags: ['Report', 'Automation', 'Team'],
     link: '/docs/free',

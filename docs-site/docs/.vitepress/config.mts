@@ -21,7 +21,7 @@ const services = [
   {
     id: 'once',
     name: 'ONCE',
-    description: '자동 지식 저장/공유 시스템',
+    description: 'AI powered 노트 · 지식 · 할일관리',
     basePath: '/once',
     icon: '📝',
     enabled: true,
@@ -29,7 +29,7 @@ const services = [
   {
     id: 'free',
     name: 'FREE',
-    description: '주간보고 자동화 시스템',
+    description: 'AI powered 주간보고 취합',
     basePath: '/free',
     icon: '📊',
     enabled: true,
