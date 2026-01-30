@@ -18,7 +18,7 @@ Windows 버전은 **GUI 기반** 데스크톱 앱입니다. CLI(WSL) 버전과 �
 
 A2G 파일 서버에서 설치 파일을 다운로드합니다:
 
-**[Nexus Coder (For Windows) Setup 4.0.10 다운로드](http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.0.10.exe)** (~99MB)
+**[Nexus Coder (For Windows) Setup 4.0.11 다운로드](http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.0.11.exe)** (~99MB)
 
 ::: warning 다운로드가 안 될 경우
 - 사내망에 연결되어 있는지 확인하세요
@@ -28,7 +28,7 @@ A2G 파일 서버에서 설치 파일을 다운로드합니다:
 
 ## 설치
 
-1. 다운로드한 `Nexus Coder (For Windows)-Setup-4.0.10.exe` 실행
+1. 다운로드한 `Nexus Coder (For Windows)-Setup-4.0.11.exe` 실행
 2. 설치 경로 선택 (기본값 권장)
 3. **Install** 클릭
 4. 설치 완료 후 **Run Nexus Coder** 체크하고 **Finish**
