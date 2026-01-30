@@ -1390,6 +1390,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
         id: true,
         name: true,
         displayName: true,
+        activityEnabled: true,
         _count: {
           select: {
             models: true,
@@ -1402,62 +1403,80 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
     // Get per-service statistics
     const serviceStats = await Promise.all(
       services.map(async (service) => {
+        const tableName = service.activityEnabled ? 'activity_logs' : 'usage_logs';
+
         const [totalUsers, todayRequests, avgDailyUsers, avgDailyUsersExcluding, totalTokens] = await Promise.all([
           // Total unique users for this service
-          prisma.usageLog.groupBy({
-            by: ['userId'],
-            where: {
-              serviceId: service.id,
-              user: { loginid: { not: 'anonymous' } },
-            },
-          }).then((r) => r.length),
+          service.activityEnabled
+            ? prisma.activityLog.groupBy({
+                by: ['userId'],
+                where: { serviceId: service.id },
+              }).then((r) => r.length)
+            : prisma.usageLog.groupBy({
+                by: ['userId'],
+                where: {
+                  serviceId: service.id,
+                  user: { loginid: { not: 'anonymous' } },
+                },
+              }).then((r) => r.length),
 
-          // Today's requests
-          prisma.usageLog.count({
-            where: {
-              serviceId: service.id,
-              timestamp: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-            },
-          }),
+          // Today's requests/activities
+          service.activityEnabled
+            ? prisma.activityLog.count({
+                where: {
+                  serviceId: service.id,
+                  timestamp: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+                },
+              })
+            : prisma.usageLog.count({
+                where: {
+                  serviceId: service.id,
+                  timestamp: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+                },
+              }),
 
           // Average daily active users (last 30 days, excluding anonymous)
-          prisma.$queryRaw<Array<{ avg_users: number }>>`
-            SELECT COALESCE(AVG(user_count), 0)::float as avg_users
-            FROM (
-              SELECT DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as user_count
-              FROM usage_logs ul
-              INNER JOIN users u ON ul.user_id = u.id
-              WHERE ul.service_id::text = ${service.id}
-                AND ul.timestamp >= NOW() - INTERVAL '30 days'
-                AND u.loginid != 'anonymous'
-              GROUP BY DATE(ul.timestamp)
-            ) daily_counts
-          `.then((r) => Math.round(r[0]?.avg_users || 0)),
+          prisma.$queryRawUnsafe<Array<{ avg_users: number }>>(
+            `SELECT COALESCE(AVG(user_count), 0)::float as avg_users
+             FROM (
+               SELECT DATE(ul.timestamp), COUNT(DISTINCT ul.user_id) as user_count
+               FROM ${tableName} ul
+               INNER JOIN users u ON ul.user_id = u.id
+               WHERE ul.service_id::text = $1
+                 AND ul.timestamp >= NOW() - INTERVAL '30 days'
+                 AND u.loginid != 'anonymous'
+               GROUP BY DATE(ul.timestamp)
+             ) daily_counts`,
+            service.id,
+          ).then((r) => Math.round(r[0]?.avg_users || 0)),
 
           // Average daily active users EXCLUDING weekends and holidays
-          prisma.$queryRaw<Array<{ avg_users: number }>>`
-            SELECT COALESCE(AVG(user_count), 0)::float as avg_users
-            FROM (
-              SELECT DATE(ul.timestamp) as log_date, COUNT(DISTINCT ul.user_id) as user_count
-              FROM usage_logs ul
-              INNER JOIN users u ON ul.user_id = u.id
-              WHERE ul.service_id::text = ${service.id}
-                AND ul.timestamp >= NOW() - INTERVAL '30 days'
-                AND u.loginid != 'anonymous'
-                AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
-                AND NOT EXISTS (
-                  SELECT 1 FROM holidays h
-                  WHERE h.date = DATE(ul.timestamp)
-                )
-              GROUP BY DATE(ul.timestamp)
-            ) daily_counts
-          `.then((r) => Math.round(r[0]?.avg_users || 0)),
+          prisma.$queryRawUnsafe<Array<{ avg_users: number }>>(
+            `SELECT COALESCE(AVG(user_count), 0)::float as avg_users
+             FROM (
+               SELECT DATE(ul.timestamp) as log_date, COUNT(DISTINCT ul.user_id) as user_count
+               FROM ${tableName} ul
+               INNER JOIN users u ON ul.user_id = u.id
+               WHERE ul.service_id::text = $1
+                 AND ul.timestamp >= NOW() - INTERVAL '30 days'
+                 AND u.loginid != 'anonymous'
+                 AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
+                 AND NOT EXISTS (
+                   SELECT 1 FROM holidays h
+                   WHERE h.date = DATE(ul.timestamp)
+                 )
+               GROUP BY DATE(ul.timestamp)
+             ) daily_counts`,
+            service.id,
+          ).then((r) => Math.round(r[0]?.avg_users || 0)),
 
-          // Total tokens
-          prisma.usageLog.aggregate({
-            where: { serviceId: service.id },
-            _sum: { totalTokens: true },
-          }).then((r) => r._sum.totalTokens || 0),
+          // Total tokens (0 for activity services)
+          service.activityEnabled
+            ? Promise.resolve(0)
+            : prisma.usageLog.aggregate({
+                where: { serviceId: service.id },
+                _sum: { totalTokens: true },
+              }).then((r) => r._sum.totalTokens || 0),
         ]);
 
         return {
@@ -1466,8 +1485,8 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           serviceDisplayName: service.displayName,
           totalUsers,
           todayRequests,
-          avgDailyActiveUsers: avgDailyUsers,  // Fixed: renamed to match frontend
-          avgDailyActiveUsersExcluding: avgDailyUsersExcluding,  // Excluding weekends & holidays
+          avgDailyActiveUsers: avgDailyUsers,
+          avgDailyActiveUsersExcluding: avgDailyUsersExcluding,
           totalTokens,
           totalModels: service._count.models,
         };

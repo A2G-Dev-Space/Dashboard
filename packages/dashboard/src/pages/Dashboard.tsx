@@ -96,9 +96,15 @@ export default function Dashboard({ serviceId, adminRole }: DashboardProps) {
     try {
       const res = await serviceApi.resetData(serviceId);
       const d = res.data.deleted;
-      setResetResult(
-        `삭제 완료: 사용 기록 ${d.usageLogs}건, 일일 통계 ${d.dailyStats}건, 평가 ${d.ratings}건, 사용자 연결 ${d.userServices}건, 피드백 ${d.feedbacks}건`
-      );
+      const parts = [
+        `사용 기록 ${d.usageLogs}건`,
+        `일일 통계 ${d.dailyStats}건`,
+        `평가 ${d.ratings}건`,
+        `사용자 연결 ${d.userServices}건`,
+        `피드백 ${d.feedbacks}건`,
+      ];
+      if (d.activityLogs) parts.push(`활동 기록 ${d.activityLogs}건`);
+      setResetResult(`삭제 완료: ${parts.join(', ')}`);
       loadData();
       window.dispatchEvent(new CustomEvent('services-updated'));
     } catch {

@@ -432,8 +432,10 @@ serviceRoutes.post('/:id/activity', async (req: Request, res) => {
     const idOrName = req.params.id as string;
 
     // 서비스 조회 (ID 또는 name)
+    // UUID 형식이면 id로, 아니면 name으로 조회
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName);
     const service = await prisma.service.findFirst({
-      where: { OR: [{ id: idOrName }, { name: idOrName }] },
+      where: isUuid ? { id: idOrName } : { name: idOrName },
       select: { id: true, name: true, activityEnabled: true },
     });
 
