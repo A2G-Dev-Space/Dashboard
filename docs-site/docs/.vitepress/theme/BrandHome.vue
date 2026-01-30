@@ -54,8 +54,8 @@ const services = [
   },
   {
     name: 'ONCE',
-    tagline: '한번만 입력하세요!',
-    desc: '알아서 정리해 드릴게요 — AI powered 노트 · 지식 · 할일관리',
+    tagline: '한번만 입력하세요, 알아서 정리해 드릴게요',
+    desc: 'AI powered 노트 · 지식 · 할일관리',
     icon: '✨',
     tags: ['Productivity', 'Writing'],
     link: '/docs/once',
@@ -64,8 +64,8 @@ const services = [
   },
   {
     name: 'FREE',
-    tagline: '주간보고 취합에서 해방!',
-    desc: '알아서 취합해 드릴게요 — AI powered 주간보고 취합',
+    tagline: '주간 보고 취합에서 해방되세요, 알아서 취합해 드릴게요',
+    desc: 'AI powered 주간보고 취합',
     icon: '📊',
     tags: ['Report', 'Automation', 'Team'],
     link: '/docs/free',
@@ -345,7 +345,6 @@ const services = [
   text-decoration: none !important;
   color: inherit;
   transition: all 0.3s ease;
-  overflow: hidden;
   backdrop-filter: blur(10px);
 }
 
@@ -360,6 +359,7 @@ const services = [
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .service-card:hover {
