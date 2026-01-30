@@ -128,6 +128,12 @@ export const statsApi = {
   // Latency stats
   latency: () => api.get('/admin/stats/latency'),
   latencyHistory: (hours = 24, interval = 10) => api.get('/admin/stats/latency/history', { params: { hours, interval } }),
+
+  // Activity stats (활동 추적 서비스용)
+  activityDaily: (days = 30, serviceId?: string) =>
+    api.get('/admin/stats/activity/daily', { params: { days, serviceId } }),
+  activityByAction: (days = 30, serviceId?: string) =>
+    api.get('/admin/stats/activity/by-action', { params: { days, serviceId } }),
 };
 
 // 개인 사용량 API
@@ -184,6 +190,7 @@ interface CreateServiceData {
   description?: string;
   iconUrl?: string;
   enabled?: boolean;
+  activityEnabled?: boolean;
 }
 
 // 휴일 관리 API

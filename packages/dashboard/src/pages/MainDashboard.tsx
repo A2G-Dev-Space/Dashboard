@@ -46,6 +46,7 @@ interface Service {
   description?: string;
   iconUrl?: string;
   enabled: boolean;
+  activityEnabled?: boolean;
   _count: {
     models: number;
     usageLogs: number;
@@ -165,6 +166,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     name: '',
     displayName: '',
     description: '',
+    activityEnabled: false,
   });
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -222,9 +224,10 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         displayName: newService.displayName,
         description: newService.description || undefined,
         enabled: true,
+        activityEnabled: newService.activityEnabled,
       });
       setShowCreateModal(false);
-      setNewService({ name: '', displayName: '', description: '' });
+      setNewService({ name: '', displayName: '', description: '', activityEnabled: false });
       loadData();
       // Notify sidebar to refresh services
       window.dispatchEvent(new CustomEvent('services-updated'));
@@ -723,6 +726,23 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
                   rows={3}
                 />
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">활동 추적 (Activity Tracking)</p>
+                  <p className="text-xs text-gray-500">LLM 프록시 없이 사용자 활동만 추적</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewService({ ...newService, activityEnabled: !newService.activityEnabled })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    newService.activityEnabled ? 'bg-samsung-blue' : 'bg-gray-300'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    newService.activityEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button

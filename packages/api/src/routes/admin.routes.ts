@@ -687,70 +687,96 @@ adminRoutes.get('/stats/overview', async (req: AuthenticatedRequest, res) => {
     const serviceId = req.query['serviceId'] as string | undefined;
     const serviceFilter = getServiceFilter(serviceId);
 
+    // activityEnabled 서비스 확인
+    let isActivityEnabled = false;
+    if (serviceId) {
+      const service = await prisma.service.findUnique({ where: { id: serviceId }, select: { activityEnabled: true } });
+      if (service?.activityEnabled) isActivityEnabled = true;
+    }
+
     // Calculate active users differently based on whether serviceId is provided
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
 
-    const [activeUsers, todayUsage, totalUsers, totalModels] = await Promise.all([
-      // Active users: service-specific from DB or global from Redis
-      serviceId
-        ? prisma.usageLog.groupBy({
-            by: ['userId'],
-            where: {
-              serviceId,
-              timestamp: { gte: thirtyMinutesAgo },
-              user: { loginid: { not: 'anonymous' } },
-            },
-          }).then((r) => r.length)
-        : getActiveUserCount(redis),
-      // Redis today usage (전체 시스템)
-      getTodayUsage(redis),
-      // DB에서 서비스별 사용자 수
-      prisma.user.count({
-        where: {
-          isActive: true,
-          loginid: { not: 'anonymous' },
-          usageLogs: { some: serviceFilter },
-        },
-      }),
-      // 서비스별 모델 수
-      prisma.model.count({
-        where: { enabled: true, ...serviceFilter },
-      }),
-    ]);
-
-    // 서비스별 today's usage (DB에서 계산)
-    let serviceTodayUsage = todayUsage;
-    if (serviceId) {
+    if (isActivityEnabled && serviceId) {
+      // Activity-based service
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
-      const todayStats = await prisma.usageLog.aggregate({
-        where: {
-          serviceId,
-          timestamp: { gte: todayStart },
-        },
-        _sum: {
-          inputTokens: true,
-          outputTokens: true,
-          totalTokens: true,
-        },
-        _count: true,
+      const [activeUsers, totalUsers, todayActivities] = await Promise.all([
+        getActiveUserCount(redis),
+        prisma.user.count({
+          where: {
+            isActive: true,
+            loginid: { not: 'anonymous' },
+            activityLogs: { some: { serviceId } },
+          },
+        }),
+        prisma.activityLog.count({
+          where: { serviceId, timestamp: { gte: todayStart } },
+        }),
+      ]);
+
+      res.json({
+        activeUsers,
+        todayUsage: { requests: 0, inputTokens: 0, outputTokens: 0, activities: todayActivities },
+        totalUsers,
+        totalModels: 0,
+        serviceId,
+        activityEnabled: true,
       });
+    } else {
+      // LLM-based service (기존 로직)
+      const [activeUsers, todayUsage, totalUsers, totalModels] = await Promise.all([
+        serviceId
+          ? prisma.usageLog.groupBy({
+              by: ['userId'],
+              where: {
+                serviceId,
+                timestamp: { gte: thirtyMinutesAgo },
+                user: { loginid: { not: 'anonymous' } },
+              },
+            }).then((r) => r.length)
+          : getActiveUserCount(redis),
+        getTodayUsage(redis),
+        prisma.user.count({
+          where: {
+            isActive: true,
+            loginid: { not: 'anonymous' },
+            usageLogs: { some: serviceFilter },
+          },
+        }),
+        prisma.model.count({
+          where: { enabled: true, ...serviceFilter },
+        }),
+      ]);
 
-      serviceTodayUsage = {
-        requests: todayStats._count,
-        inputTokens: todayStats._sum.inputTokens || 0,
-        outputTokens: todayStats._sum.outputTokens || 0,
-      };
+      let serviceTodayUsage = todayUsage;
+      if (serviceId) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+
+        const todayStats = await prisma.usageLog.aggregate({
+          where: { serviceId, timestamp: { gte: todayStart } },
+          _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
+          _count: true,
+        });
+
+        serviceTodayUsage = {
+          requests: todayStats._count,
+          inputTokens: todayStats._sum.inputTokens || 0,
+          outputTokens: todayStats._sum.outputTokens || 0,
+        };
+      }
+
+      res.json({
+        activeUsers,
+        todayUsage: serviceTodayUsage,
+        totalUsers,
+        totalModels,
+        serviceId: serviceId || null,
+        activityEnabled: false,
+      });
     }
-
-    res.json({
-      activeUsers,
-      todayUsage: serviceTodayUsage,
-      totalUsers,
-      totalModels,
-      serviceId: serviceId || null,
-    });
   } catch (error) {
     console.error('Get overview stats error:', error);
     res.status(500).json({ error: 'Failed to get statistics' });
@@ -938,6 +964,7 @@ adminRoutes.get('/stats/by-dept', async (req: AuthenticatedRequest, res) => {
  * GET /admin/stats/daily-active-users
  * Get daily active user count for charts
  * Query: ?serviceId= (optional), ?days= (14-365)
+ * activityEnabled 서비스이면 activity_logs에서 조회
  */
 adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, res) => {
   try {
@@ -947,20 +974,30 @@ adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, r
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
-    // Get distinct users per day from usage logs (excluding anonymous)
+    // activityEnabled 서비스 확인
+    let useActivityLogs = false;
+    if (serviceId) {
+      const service = await prisma.service.findUnique({ where: { id: serviceId }, select: { activityEnabled: true } });
+      if (service?.activityEnabled) useActivityLogs = true;
+    }
+
+    const tableName = useActivityLogs ? 'activity_logs' : 'usage_logs';
+
+    // Get distinct users per day (excluding anonymous)
     let dailyUsers: Array<{ date: Date | string; user_count: bigint }>;
 
     if (serviceId) {
-      dailyUsers = await prisma.$queryRaw`
-        SELECT DATE(ul.timestamp) as date, COUNT(DISTINCT ul.user_id) as user_count
-        FROM usage_logs ul
-        INNER JOIN users u ON ul.user_id = u.id
-        WHERE ul.timestamp >= ${startDate}
-          AND u.loginid != 'anonymous'
-          AND ul.service_id::text = ${serviceId}
-        GROUP BY DATE(ul.timestamp)
-        ORDER BY date ASC
-      `;
+      dailyUsers = await prisma.$queryRawUnsafe(
+        `SELECT DATE(ul.timestamp) as date, COUNT(DISTINCT ul.user_id) as user_count
+         FROM ${tableName} ul
+         INNER JOIN users u ON ul.user_id = u.id
+         WHERE ul.timestamp >= $1
+           AND u.loginid != 'anonymous'
+           AND ul.service_id::text = $2
+         GROUP BY DATE(ul.timestamp)
+         ORDER BY date ASC`,
+        startDate, serviceId,
+      );
     } else {
       dailyUsers = await prisma.$queryRaw`
         SELECT DATE(ul.timestamp) as date, COUNT(DISTINCT ul.user_id) as user_count
@@ -982,14 +1019,15 @@ adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, r
     let totalUsers: Array<{ count: bigint }>;
 
     if (serviceId) {
-      totalUsers = await prisma.$queryRaw`
-        SELECT COUNT(DISTINCT ul.user_id) as count
-        FROM usage_logs ul
-        INNER JOIN users u ON ul.user_id = u.id
-        WHERE ul.timestamp >= ${startDate}
-          AND u.loginid != 'anonymous'
-          AND ul.service_id::text = ${serviceId}
-      `;
+      totalUsers = await prisma.$queryRawUnsafe(
+        `SELECT COUNT(DISTINCT ul.user_id) as count
+         FROM ${tableName} ul
+         INNER JOIN users u ON ul.user_id = u.id
+         WHERE ul.timestamp >= $1
+           AND u.loginid != 'anonymous'
+           AND ul.service_id::text = $2`,
+        startDate, serviceId,
+      );
     } else {
       totalUsers = await prisma.$queryRaw`
         SELECT COUNT(DISTINCT ul.user_id) as count
@@ -1014,6 +1052,7 @@ adminRoutes.get('/stats/daily-active-users', async (req: AuthenticatedRequest, r
  * GET /admin/stats/cumulative-users
  * Get cumulative unique user count by date
  * Query: ?serviceId= (optional), ?days= (14-365)
+ * activityEnabled 서비스이면 activity_logs에서 조회
  */
 adminRoutes.get('/stats/cumulative-users', async (req: AuthenticatedRequest, res) => {
   try {
@@ -1023,34 +1062,45 @@ adminRoutes.get('/stats/cumulative-users', async (req: AuthenticatedRequest, res
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
 
+    // activityEnabled 서비스 확인
+    let useActivityLogs = false;
+    if (serviceId) {
+      const service = await prisma.service.findUnique({ where: { id: serviceId }, select: { activityEnabled: true } });
+      if (service?.activityEnabled) useActivityLogs = true;
+    }
+
+    const tableName = useActivityLogs ? 'activity_logs' : 'usage_logs';
+
     // Get the first usage date for each user
     let userFirstUsage: Array<{ first_date: Date | string; new_users: bigint }>;
     let existingUsers: Array<{ count: bigint }>;
 
     if (serviceId) {
-      userFirstUsage = await prisma.$queryRaw`
-        SELECT DATE(first_usage) as first_date, COUNT(*) as new_users
-        FROM (
-          SELECT ul.user_id, MIN(ul.timestamp) as first_usage
-          FROM usage_logs ul
-          INNER JOIN users u ON ul.user_id = u.id
-          WHERE u.loginid != 'anonymous'
-            AND ul.service_id::text = ${serviceId}
-          GROUP BY ul.user_id
-        ) as user_first
-        WHERE first_usage >= ${startDate}
-        GROUP BY DATE(first_usage)
-        ORDER BY first_date ASC
-      `;
+      userFirstUsage = await prisma.$queryRawUnsafe(
+        `SELECT DATE(first_usage) as first_date, COUNT(*) as new_users
+         FROM (
+           SELECT ul.user_id, MIN(ul.timestamp) as first_usage
+           FROM ${tableName} ul
+           INNER JOIN users u ON ul.user_id = u.id
+           WHERE u.loginid != 'anonymous'
+             AND ul.service_id::text = $1
+           GROUP BY ul.user_id
+         ) as user_first
+         WHERE first_usage >= $2
+         GROUP BY DATE(first_usage)
+         ORDER BY first_date ASC`,
+        serviceId, startDate,
+      );
 
-      existingUsers = await prisma.$queryRaw`
-        SELECT COUNT(DISTINCT ul.user_id) as count
-        FROM usage_logs ul
-        INNER JOIN users u ON ul.user_id = u.id
-        WHERE ul.timestamp < ${startDate}
-          AND u.loginid != 'anonymous'
-          AND ul.service_id::text = ${serviceId}
-      `;
+      existingUsers = await prisma.$queryRawUnsafe(
+        `SELECT COUNT(DISTINCT ul.user_id) as count
+         FROM ${tableName} ul
+         INNER JOIN users u ON ul.user_id = u.id
+         WHERE ul.timestamp < $1
+           AND u.loginid != 'anonymous'
+           AND ul.service_id::text = $2`,
+        startDate, serviceId,
+      );
     } else {
       userFirstUsage = await prisma.$queryRaw`
         SELECT DATE(first_usage) as first_date, COUNT(*) as new_users
@@ -2812,5 +2862,106 @@ adminRoutes.get('/stats/latency/history', async (req: AuthenticatedRequest, res)
   } catch (error) {
     console.error('Get latency history error:', error);
     res.status(500).json({ error: 'Failed to get latency history' });
+  }
+});
+
+// ============================================
+// Activity Stats (활동 추적 서비스용)
+// ============================================
+
+/**
+ * GET /admin/stats/activity/daily
+ * 일별 활동 횟수
+ * Query: ?serviceId= (required), ?days= (14-365)
+ */
+adminRoutes.get('/stats/activity/daily', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    if (!serviceId) {
+      res.status(400).json({ error: 'serviceId is required' });
+      return;
+    }
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    const dailyActivity: Array<{ date: Date | string; activity_count: bigint }> = await prisma.$queryRaw`
+      SELECT DATE(timestamp) as date, COUNT(*) as activity_count
+      FROM activity_logs
+      WHERE service_id::text = ${serviceId}
+        AND timestamp >= ${startDate}
+      GROUP BY DATE(timestamp)
+      ORDER BY date ASC
+    `;
+
+    const chartData = dailyActivity.map((item) => ({
+      date: formatDateToString(item.date),
+      activityCount: Number(item.activity_count),
+    }));
+
+    const totalActivities = chartData.reduce((sum, item) => sum + item.activityCount, 0);
+
+    res.json({ chartData, totalActivities });
+  } catch (error) {
+    console.error('Get daily activity error:', error);
+    res.status(500).json({ error: 'Failed to get daily activity' });
+  }
+});
+
+/**
+ * GET /admin/stats/activity/by-action
+ * 액션 종류별 일별 활동 추이
+ * Query: ?serviceId= (required), ?days= (14-365)
+ */
+adminRoutes.get('/stats/activity/by-action', async (req: AuthenticatedRequest, res) => {
+  try {
+    const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 30));
+    const serviceId = req.query['serviceId'] as string | undefined;
+
+    if (!serviceId) {
+      res.status(400).json({ error: 'serviceId is required' });
+      return;
+    }
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    startDate.setHours(0, 0, 0, 0);
+
+    const rawData: Array<{ date: Date | string; action: string; count: bigint }> = await prisma.$queryRaw`
+      SELECT DATE(timestamp) as date, action, COUNT(*) as count
+      FROM activity_logs
+      WHERE service_id::text = ${serviceId}
+        AND timestamp >= ${startDate}
+      GROUP BY DATE(timestamp), action
+      ORDER BY date ASC, action
+    `;
+
+    // Get all unique actions
+    const actions = [...new Set(rawData.map((r) => r.action))];
+
+    // Pivot: { date, action1: count, action2: count, ... }
+    const dateMap = new Map<string, Record<string, number>>();
+    for (const row of rawData) {
+      const dateStr = formatDateToString(row.date);
+      if (!dateMap.has(dateStr)) {
+        const entry: Record<string, number> = {};
+        for (const a of actions) entry[a] = 0;
+        dateMap.set(dateStr, entry);
+      }
+      dateMap.get(dateStr)![row.action] = Number(row.count);
+    }
+
+    const chartData = Array.from(dateMap.entries()).map(([date, counts]) => ({
+      date,
+      ...counts,
+    }));
+
+    res.json({ chartData, actions });
+  } catch (error) {
+    console.error('Get activity by action error:', error);
+    res.status(500).json({ error: 'Failed to get activity by action' });
   }
 });

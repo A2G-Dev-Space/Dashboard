@@ -9,9 +9,11 @@
  * - DELETE /services/:id: 서비스 삭제 (SUPER_ADMIN)
  */
 
-import { Router, RequestHandler } from 'express';
-import { prisma } from '../index.js';
+import { Router, Request, RequestHandler } from 'express';
+import { prisma, redis } from '../index.js';
 import { authenticateToken, requireAdmin, requireSuperAdmin, AuthenticatedRequest } from '../middleware/auth.js';
+import { trackActiveUser } from '../services/redis.service.js';
+import { getOrCreateUser } from '../utils/user.js';
 import { z } from 'zod';
 
 export const serviceRoutes = Router();
@@ -23,6 +25,7 @@ const createServiceSchema = z.object({
   description: z.string().max(1000).optional(),
   iconUrl: z.string().url().optional().nullable(),
   enabled: z.boolean().default(true),
+  activityEnabled: z.boolean().default(false).optional(),
 });
 
 const updateServiceSchema = z.object({
@@ -30,6 +33,12 @@ const updateServiceSchema = z.object({
   description: z.string().max(1000).optional().nullable(),
   iconUrl: z.string().url().optional().nullable(),
   enabled: z.boolean().optional(),
+  activityEnabled: z.boolean().optional(),
+});
+
+const activitySchema = z.object({
+  action: z.string().min(1).max(100),
+  metadata: z.record(z.unknown()).optional(),
 });
 
 /**
@@ -48,6 +57,7 @@ serviceRoutes.get('/', authenticateToken, async (_req: AuthenticatedRequest, res
         description: true,
         iconUrl: true,
         enabled: true,
+        activityEnabled: true,
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -85,6 +95,7 @@ serviceRoutes.get(
           description: true,
           iconUrl: true,
           enabled: true,
+          activityEnabled: true,
           createdAt: true,
           updatedAt: true,
           _count: {
@@ -294,12 +305,13 @@ serviceRoutes.post(
         return;
       }
 
-      const [usageLogs, dailyStats, ratings, userServices, feedbacks] = await prisma.$transaction([
+      const [usageLogs, dailyStats, ratings, userServices, feedbacks, activityLogs] = await prisma.$transaction([
         prisma.usageLog.deleteMany({ where: { serviceId: id } }),
         prisma.dailyUsageStat.deleteMany({ where: { serviceId: id } }),
         prisma.ratingFeedback.deleteMany({ where: { serviceId: id } }),
         prisma.userService.deleteMany({ where: { serviceId: id } }),
         prisma.feedback.deleteMany({ where: { serviceId: id } }),
+        prisma.activityLog.deleteMany({ where: { serviceId: id } }),
       ]);
 
       res.json({
@@ -310,6 +322,7 @@ serviceRoutes.post(
           ratings: ratings.count,
           userServices: userServices.count,
           feedbacks: feedbacks.count,
+          activityLogs: activityLogs.count,
         },
       });
     } catch (error) {
@@ -338,56 +351,136 @@ serviceRoutes.get(
         return;
       }
 
-      // Get statistics
-      const [totalUsers, totalModels, totalRequests, todayRequests] = await Promise.all([
-        // Unique users who have used this service
-        prisma.usageLog.groupBy({
-          by: ['userId'],
-          where: { serviceId: id },
-        }).then((r) => r.length),
+      const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
 
-        // Models in this service
-        prisma.model.count({ where: { serviceId: id } }),
+      if (service.activityEnabled) {
+        // Activity-based service stats
+        const [totalUsers, totalActivities, todayActivities] = await Promise.all([
+          prisma.activityLog.groupBy({
+            by: ['userId'],
+            where: { serviceId: id },
+          }).then((r) => r.length),
+          prisma.activityLog.count({ where: { serviceId: id } }),
+          prisma.activityLog.count({
+            where: { serviceId: id, timestamp: { gte: todayStart } },
+          }),
+        ]);
 
-        // Total requests
-        prisma.usageLog.count({ where: { serviceId: id } }),
-
-        // Today's requests
-        prisma.usageLog.count({
-          where: {
-            serviceId: id,
-            timestamp: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            },
+        res.json({
+          serviceId: id,
+          activityEnabled: true,
+          stats: {
+            totalUsers,
+            totalModels: 0,
+            totalRequests: 0,
+            todayRequests: 0,
+            totalActivities,
+            todayActivities,
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            totalTokens: 0,
           },
-        }),
-      ]);
+        });
+      } else {
+        // LLM-based service stats
+        const [totalUsers, totalModels, totalRequests, todayRequests] = await Promise.all([
+          prisma.usageLog.groupBy({
+            by: ['userId'],
+            where: { serviceId: id },
+          }).then((r) => r.length),
+          prisma.model.count({ where: { serviceId: id } }),
+          prisma.usageLog.count({ where: { serviceId: id } }),
+          prisma.usageLog.count({
+            where: { serviceId: id, timestamp: { gte: todayStart } },
+          }),
+        ]);
 
-      // Token usage
-      const tokenUsage = await prisma.usageLog.aggregate({
-        where: { serviceId: id },
-        _sum: {
-          inputTokens: true,
-          outputTokens: true,
-          totalTokens: true,
-        },
-      });
+        const tokenUsage = await prisma.usageLog.aggregate({
+          where: { serviceId: id },
+          _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
+        });
 
-      res.json({
-        serviceId: id,
-        stats: {
-          totalUsers,
-          totalModels,
-          totalRequests,
-          todayRequests,
-          totalInputTokens: tokenUsage._sum?.inputTokens || 0,
-          totalOutputTokens: tokenUsage._sum?.outputTokens || 0,
-          totalTokens: tokenUsage._sum?.totalTokens || 0,
-        },
-      });
+        res.json({
+          serviceId: id,
+          activityEnabled: false,
+          stats: {
+            totalUsers,
+            totalModels,
+            totalRequests,
+            todayRequests,
+            totalInputTokens: tokenUsage._sum?.inputTokens || 0,
+            totalOutputTokens: tokenUsage._sum?.outputTokens || 0,
+            totalTokens: tokenUsage._sum?.totalTokens || 0,
+          },
+        });
+      }
     } catch (error) {
       console.error('Get service stats error:', error);
       res.status(500).json({ error: 'Failed to get service stats' });
     }
   }
 );
+
+/**
+ * POST /services/:id/activity
+ * 외부 서비스에서 사용자 활동을 기록 (인증 불필요, 헤더 기반 사용자 식별)
+ * activityEnabled가 true인 서비스만 허용
+ * :id는 서비스 UUID 또는 name 모두 가능
+ */
+serviceRoutes.post('/:id/activity', async (req: Request, res) => {
+  try {
+    const idOrName = req.params.id as string;
+
+    // 서비스 조회 (ID 또는 name)
+    const service = await prisma.service.findFirst({
+      where: { OR: [{ id: idOrName }, { name: idOrName }] },
+      select: { id: true, name: true, activityEnabled: true },
+    });
+
+    if (!service) {
+      res.status(404).json({ error: 'Service not found' });
+      return;
+    }
+
+    if (!service.activityEnabled) {
+      res.status(400).json({ error: 'Activity tracking is not enabled for this service' });
+      return;
+    }
+
+    // Body 검증
+    const validation = activitySchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    // 사용자 조회/생성
+    const user = await getOrCreateUser(req);
+
+    // ActivityLog 생성
+    const activityLog = await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        serviceId: service.id,
+        action: validation.data.action,
+        metadata: validation.data.metadata ? JSON.parse(JSON.stringify(validation.data.metadata)) : undefined,
+      },
+    });
+
+    // UserService upsert
+    await prisma.userService.upsert({
+      where: { userId_serviceId: { userId: user.id, serviceId: service.id } },
+      update: { lastActive: new Date(), requestCount: { increment: 1 } },
+      create: { userId: user.id, serviceId: service.id, firstSeen: new Date(), lastActive: new Date(), requestCount: 1 },
+    });
+
+    // Redis 활성 사용자 추적
+    await trackActiveUser(redis, user.loginid);
+
+    console.log(`[Activity] ${user.loginid} → ${service.name} (${validation.data.action})`);
+    res.status(201).json({ activityLog: { id: activityLog.id, action: activityLog.action, timestamp: activityLog.timestamp } });
+  } catch (error) {
+    console.error('Record activity error:', error);
+    res.status(500).json({ error: 'Failed to record activity' });
+  }
+});
