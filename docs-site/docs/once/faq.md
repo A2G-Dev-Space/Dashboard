@@ -188,6 +188,6 @@ Super Admin(syngha.han)에게 요청하세요.
 ### Q: 버그 제보 / 기능 요청은 어디로?
 
 **Dashboard Feedback** 페이지를 이용해주세요:
-- [Feedback 페이지](https://a2g.samsungds.net/feedback)
+- [Feedback 페이지](http://a2g.samsungds.net/feedback)
 
 또는 개발자(syngha.han)에게 직접 연락주세요.

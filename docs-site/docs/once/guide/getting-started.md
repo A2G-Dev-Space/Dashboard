@@ -8,7 +8,7 @@
 브라우저에서 다음 주소로 접속합니다:
 
 ::: tip 접속 URL
-**[https://a2g.samsungds.net:16001](https://a2g.samsungds.net:16001)**
+**[http://a2g.samsungds.net:16001](http://a2g.samsungds.net:16001)**
 :::
 
 ::: warning 사내망 필수

@@ -73,7 +73,7 @@ ONCE는 **모든 노트 작성/수정이 AI를 통해서만** 이루어집니다
 ## 접속 방법
 
 ::: tip 접속 URL
-**[https://a2g.samsungds.net:16001](https://a2g.samsungds.net:16001)**
+**[http://a2g.samsungds.net:16001](http://a2g.samsungds.net:16001)**
 
 SSO 로그인 후 자동으로 개인/팀 공간이 생성됩니다.
 :::
