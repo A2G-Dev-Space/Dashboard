@@ -52,6 +52,7 @@ export const serviceApi = {
   create: (data: CreateServiceData) => api.post('/services', data),
   update: (id: string, data: Partial<CreateServiceData>) => api.put(`/services/${id}`, data),
   delete: (id: string) => api.delete(`/services/${id}`),
+  resetData: (id: string) => api.post(`/services/${id}/reset-data`),
   stats: (id: string) => api.get(`/services/${id}/stats`),
 };
 

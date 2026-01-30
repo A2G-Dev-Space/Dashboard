@@ -22,9 +22,9 @@ interface User {
 type AdminRole = 'SUPER_ADMIN' | 'SERVICE_ADMIN' | 'VIEWER' | 'SERVICE_VIEWER' | null;
 
 // Wrapper components to pass serviceId prop from URL params
-function ServiceDashboardWrapper() {
+function ServiceDashboardWrapper({ adminRole }: { adminRole: AdminRole }) {
   const { serviceId } = useParams<{ serviceId: string }>();
-  return <Dashboard serviceId={serviceId} />;
+  return <Dashboard serviceId={serviceId} adminRole={adminRole} />;
 }
 
 function ServiceModelsWrapper() {
@@ -122,7 +122,7 @@ function App() {
             )}
 
             {/* 서비스별 라우트 */}
-            <Route path="/service/:serviceId" element={<ServiceDashboardWrapper />} />
+            <Route path="/service/:serviceId" element={<ServiceDashboardWrapper adminRole={adminRole} />} />
             <Route path="/service/:serviceId/models" element={<ServiceModelsWrapper />} />
             <Route path="/service/:serviceId/users" element={<ServiceUsersWrapper />} />
           </>

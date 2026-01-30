@@ -276,6 +276,50 @@ serviceRoutes.delete(
 );
 
 /**
+ * POST /services/:id/reset-data
+ * 서비스 데이터 초기화 (SUPER_ADMIN 전용)
+ * 모델은 유지하고 사용 기록/통계/피드백/평가 데이터만 삭제
+ */
+serviceRoutes.post(
+  '/:id/reset-data',
+  authenticateToken,
+  requireSuperAdmin as RequestHandler,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      const id = req.params.id as string;
+
+      const existing = await prisma.service.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Service not found' });
+        return;
+      }
+
+      const [usageLogs, dailyStats, ratings, userServices, feedbacks] = await prisma.$transaction([
+        prisma.usageLog.deleteMany({ where: { serviceId: id } }),
+        prisma.dailyUsageStat.deleteMany({ where: { serviceId: id } }),
+        prisma.ratingFeedback.deleteMany({ where: { serviceId: id } }),
+        prisma.userService.deleteMany({ where: { serviceId: id } }),
+        prisma.feedback.deleteMany({ where: { serviceId: id } }),
+      ]);
+
+      res.json({
+        message: 'Service data reset successfully',
+        deleted: {
+          usageLogs: usageLogs.count,
+          dailyStats: dailyStats.count,
+          ratings: ratings.count,
+          userServices: userServices.count,
+          feedbacks: feedbacks.count,
+        },
+      });
+    } catch (error) {
+      console.error('Reset service data error:', error);
+      res.status(500).json({ error: 'Failed to reset service data' });
+    }
+  }
+);
+
+/**
  * GET /services/:id/stats
  * 서비스별 통계 요약
  */
