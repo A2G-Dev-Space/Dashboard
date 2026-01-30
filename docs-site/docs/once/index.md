@@ -66,7 +66,7 @@ ONCE는 **모든 노트 작성/수정이 AI를 통해서만** 이루어집니다
 ## Nexus Coder 연동
 
 ::: info Nexus Coder로 ONCE를 관리하세요
-[Nexus Coder](/nexus-coder/) 또는 [Nexus Coder for Windows](/nexus-coder-windows/)에서 ONCE의 노트와 할일을 직접 관리할 수 있습니다.
+[Nexus Coder](/guide/getting-started) 또는 [Nexus Coder for Windows](/guide-windows/getting-started)에서 ONCE의 노트와 할일을 직접 관리할 수 있습니다.
 코딩하면서 떠오른 아이디어나 회의 내용을 터미널에서 바로 ONCE에 입력하세요.
 :::
 

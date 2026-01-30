@@ -63,7 +63,7 @@ features:
 ## Nexus Coder 연동
 
 ::: info Nexus Coder로 FREE를 관리하세요
-[Nexus Coder](/nexus-coder/) 또는 [Nexus Coder for Windows](/nexus-coder-windows/)에서 FREE에 업무 내용을 바로 입력할 수 있습니다.
+[Nexus Coder](/guide/getting-started) 또는 [Nexus Coder for Windows](/guide-windows/getting-started)에서 FREE에 업무 내용을 바로 입력할 수 있습니다.
 코딩 중 완료한 업무를 터미널에서 바로 FREE에 기록하면, 자정에 자동으로 보고서에 반영됩니다.
 :::
 
