@@ -422,9 +422,12 @@ const services = [
 
 .service-tagline {
   font-size: 0.9rem;
-  color: #60a5fa;
+  color: #60a5fa !important;
   font-weight: 500;
+  line-height: 1.5;
   margin: 0 0 14px 0;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .service-desc {
