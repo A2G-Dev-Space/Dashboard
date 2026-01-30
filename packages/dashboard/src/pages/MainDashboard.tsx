@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock, Star } from 'lucide-react';
+import { Users, Activity, Zap, Building2, TrendingUp, ArrowRight, Server, Plus, X, Clock, Star, Trash2 } from 'lucide-react';
 import { statsApi, serviceApi, ratingApi } from '../services/api';
 import WeeklyBusinessDAUChart from '../components/Charts/WeeklyBusinessDAUChart';
 
@@ -166,6 +166,9 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
     displayName: '',
     description: '',
   });
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -230,6 +233,32 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       alert('서비스 생성에 실패했습니다. 이미 존재하는 이름인지 확인해주세요.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDeleteService = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await serviceApi.delete(deleteTarget.id);
+      setDeleteTarget(null);
+      loadData();
+      window.dispatchEvent(new CustomEvent('services-updated'));
+    } catch (error: unknown) {
+      const err = error as { response?: { status?: number; data?: { details?: { models?: number; usageLogs?: number; feedbacks?: number } } } };
+      if (err.response?.status === 409) {
+        const d = err.response.data?.details;
+        setDeleteError(
+          `연결된 데이터가 있어 삭제할 수 없습니다.\n` +
+          `모델: ${d?.models ?? 0}개 / 사용 기록: ${d?.usageLogs ?? 0}개 / 피드백: ${d?.feedbacks ?? 0}개\n` +
+          `먼저 연결된 데이터를 삭제해주세요.`
+        );
+      } else {
+        setDeleteError('서비스 삭제에 실패했습니다.');
+      }
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -590,7 +619,23 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                     <p className="text-xs text-gray-500">{service.serviceName}</p>
                   </div>
                 </div>
-                <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-samsung-blue transition-colors" />
+                <div className="flex items-center gap-1">
+                  {adminRole === 'SUPER_ADMIN' && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDeleteError(null);
+                        setDeleteTarget({ id: service.serviceId, name: service.serviceDisplayName });
+                      }}
+                      className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      title="서비스 삭제"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-samsung-blue transition-colors" />
+                </div>
               </div>
               {service.hasData ? (
                 <div className="grid grid-cols-3 gap-2 text-center">
@@ -696,6 +741,48 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Service Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900">서비스 삭제</h3>
+              <button onClick={() => setDeleteTarget(null)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-gray-700">
+                <span className="font-semibold text-gray-900">{deleteTarget.name}</span> 서비스를 삭제하시겠습니까?
+              </p>
+              <p className="text-xs text-gray-500">이 작업은 되돌릴 수 없습니다.</p>
+              {deleteError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-600 whitespace-pre-line">{deleteError}</p>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteService}
+                  disabled={deleting}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? '삭제 중...' : '삭제'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
