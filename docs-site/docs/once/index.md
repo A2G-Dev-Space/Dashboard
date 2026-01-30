@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "ONCE"
-  text: "한번만 입력하세요, 알아서 정리해 드릴게요"
+  text: "한번만 입력하세요,\n알아서 정리해 드릴게요"
   tagline: "AI powered 노트 · 지식 · 할일관리"
   actions:
     - theme: brand
@@ -43,6 +43,7 @@ features:
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  white-space: pre-line;
 }
 </style>
 

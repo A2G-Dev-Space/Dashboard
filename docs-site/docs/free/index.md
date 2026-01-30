@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: "FREE"
-  text: "주간 보고 취합에서 해방되세요, 알아서 취합해 드릴게요"
+  text: "주간 보고 취합에서 해방되세요,\n알아서 취합해 드릴게요"
   tagline: "AI powered 주간보고 취합"
   actions:
     - theme: brand
@@ -40,6 +40,7 @@ features:
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  white-space: pre-line;
 }
 </style>
 
