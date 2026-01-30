@@ -59,7 +59,17 @@ const services = [
     icon: '✨',
     tags: ['Productivity', 'Writing'],
     link: '/docs/once',
-    status: 'coming',
+    status: 'available',
+    featured: false,
+  },
+  {
+    name: 'FREE',
+    tagline: 'Fast Report & Easy Evidence',
+    desc: '주간보고에서 해방! 업무 내용만 입력하면 AI가 팀 보고서를 자동 생성합니다.',
+    icon: '📊',
+    tags: ['Report', 'Automation', 'Team'],
+    link: '/docs/free',
+    status: 'available',
     featured: false,
   },
 ]

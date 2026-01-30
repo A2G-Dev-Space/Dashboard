@@ -26,6 +26,14 @@ const services = [
     icon: '📝',
     enabled: true,
   },
+  {
+    id: 'free',
+    name: 'FREE',
+    description: '주간보고 자동화 시스템',
+    basePath: '/free',
+    icon: '📊',
+    enabled: true,
+  },
 ]
 
 export default defineConfig({
@@ -132,6 +140,30 @@ export default defineConfig({
               text: 'Reference',
               items: [
                 { text: 'FAQ', link: '/once/faq' },
+              ]
+            }
+          ]
+        }
+      ],
+      '/free/': [
+        {
+          text: '📊 FREE',
+          collapsed: false,
+          items: [
+            { text: 'Overview', link: '/free/' },
+            {
+              text: 'Guide',
+              items: [
+                { text: '시작하기', link: '/free/guide/getting-started' },
+                { text: '기본 사용법', link: '/free/guide/basic-usage' },
+                { text: '보고서', link: '/free/guide/reports' },
+                { text: '관리자 기능', link: '/free/guide/admin' },
+              ]
+            },
+            {
+              text: 'Reference',
+              items: [
+                { text: 'FAQ', link: '/free/faq' },
               ]
             }
           ]
