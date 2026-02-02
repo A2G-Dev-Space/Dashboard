@@ -19,35 +19,6 @@ const DEFAULT_USER = {
   deptname: 'Unknown',
 };
 
-// 기본 서비스 설정 (환경변수에서 가져오기)
-const DEFAULT_SERVICE_NAME = process.env['DEFAULT_SERVICE_NAME'] || process.env['DEFAULT_SERVICE_ID'] || 'nexus-coder';
-
-// 서비스 ID 캐시 (매 요청마다 DB 조회 방지)
-let cachedDefaultServiceId: string | null = null;
-
-/**
- * 기본 서비스 ID 조회 (캐시 사용)
- */
-async function getDefaultServiceId(): Promise<string | null> {
-  if (cachedDefaultServiceId) {
-    return cachedDefaultServiceId;
-  }
-
-  const service = await prisma.service.findFirst({
-    where: { name: DEFAULT_SERVICE_NAME },
-    select: { id: true },
-  });
-
-  if (service) {
-    cachedDefaultServiceId = service.id;
-    console.log(`[Service] Default service resolved: ${DEFAULT_SERVICE_NAME} -> ${service.id}`);
-  } else {
-    console.warn(`[Service] Default service '${DEFAULT_SERVICE_NAME}' not found in database`);
-  }
-
-  return cachedDefaultServiceId;
-}
-
 /**
  * 요청에서 서비스 ID 추출
  * X-Service-Id 헤더가 있으면 해당 서비스, 없으면 기본 서비스
@@ -76,13 +47,11 @@ async function getServiceIdFromRequest(req: Request): Promise<{ serviceId: strin
     return { serviceId: null, error: `Service '${serviceHeader}' is not registered. Please contact admin to register your service.` };
   }
 
-  // 헤더가 없는 경우 경고 로그 + 기본 서비스(nexus-coder) 폴백
-  // TODO: 추후 X-Service-Id 헤더 필수화 예정 → error 반환으로 전환
+  // 헤더가 없는 경우 → 에러 반환 (X-Service-Id 필수)
   const loginid = (req.headers['x-user-id'] as string) || 'unknown';
   const path = req.originalUrl || req.url;
-  console.warn(`[Service] ⚠️ Missing X-Service-Id header: user=${loginid}, path=${path} → defaulting to '${DEFAULT_SERVICE_NAME}'`);
-  const defaultServiceId = await getDefaultServiceId();
-  return { serviceId: defaultServiceId, error: null };
+  console.warn(`[Service] ⚠️ Missing X-Service-Id header: user=${loginid}, path=${path} → rejected`);
+  return { serviceId: null, error: 'X-Service-Id header is required. Please update your tool to the latest version following the guide at https://a2g.samsungds.net:4090/docs' };
 }
 
 /**
