@@ -39,6 +39,74 @@ adminRoutes.use(requireAdmin as RequestHandler);
 
 // ==================== Models Management ====================
 
+/**
+ * 모델 엔드포인트 Health Check
+ * endpointUrl + apiKey로 실제 LLM 서버에 연결 가능한지 확인
+ * /v1/models 또는 /chat/completions에 간단한 요청을 보내서 확인
+ */
+const HEALTH_CHECK_TIMEOUT_MS = 10000; // 10초
+
+async function checkModelEndpointHealth(
+  endpointUrl: string,
+  apiKey?: string
+): Promise<{ healthy: boolean; status?: number; message: string; latencyMs: number }> {
+  const startTime = Date.now();
+
+  // endpointUrl에서 base URL 추출 (/chat/completions, /v1 등 제거)
+  let baseUrl = endpointUrl.trim().replace(/\/+$/, '');
+  // /chat/completions 제거
+  if (baseUrl.endsWith('/chat/completions')) {
+    baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
+  }
+  // /completions 제거
+  if (baseUrl.endsWith('/completions')) {
+    baseUrl = baseUrl.replace(/\/completions$/, '');
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+
+  try {
+    // 1차: GET /v1/models (또는 base/models) 시도
+    const modelsUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+    const response = await fetch(modelsUrl, {
+      method: 'GET',
+      headers,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    if (response.ok) {
+      return { healthy: true, status: response.status, message: 'Endpoint is reachable', latencyMs };
+    }
+
+    // 401/403은 인증 문제지만 서버는 살아있음
+    if (response.status === 401 || response.status === 403) {
+      return { healthy: false, status: response.status, message: 'Endpoint reachable but authentication failed. Check API key.', latencyMs };
+    }
+
+    return { healthy: true, status: response.status, message: `Endpoint responded with status ${response.status}`, latencyMs };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        return { healthy: false, message: `Connection timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
+      }
+      return { healthy: false, message: `Connection failed: ${error.message}`, latencyMs };
+    }
+    return { healthy: false, message: 'Connection failed: Unknown error', latencyMs };
+  }
+}
+
 const modelSchema = z.object({
   name: z.string().min(1).max(100),
   displayName: z.string().min(1).max(200),
@@ -137,6 +205,21 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
       const accessibleServiceIds = await getAccessibleServiceIds(req);
       if (accessibleServiceIds !== null && !accessibleServiceIds.includes(serviceId)) {
         res.status(403).json({ error: 'No access to create models for this service' });
+        return;
+      }
+    }
+
+    // Health check: 엔드포인트 연결 확인
+    const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
+    if (!skipHealthCheck) {
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.apiKey);
+      console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.latencyMs}ms) ${healthResult.message}`);
+
+      if (!healthResult.healthy) {
+        res.status(400).json({
+          error: 'Endpoint health check failed',
+          healthCheck: healthResult,
+        });
         return;
       }
     }
@@ -245,6 +328,27 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
     if (!validation.success) {
       res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
       return;
+    }
+
+    // Health check: endpointUrl 또는 apiKey가 변경된 경우 연결 확인
+    const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
+    if (!skipHealthCheck && (validation.data.endpointUrl || validation.data.apiKey)) {
+      // 변경되지 않은 필드는 기존 값 사용
+      const existing = await prisma.model.findUnique({ where: { id }, select: { endpointUrl: true, apiKey: true, name: true } });
+      if (existing) {
+        const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
+        const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
+        const healthResult = await checkModelEndpointHealth(endpointUrl, apiKey);
+        console.log(`[HealthCheck] Model "${existing.name}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.latencyMs}ms) ${healthResult.message}`);
+
+        if (!healthResult.healthy) {
+          res.status(400).json({
+            error: 'Endpoint health check failed',
+            healthCheck: healthResult,
+          });
+          return;
+        }
+      }
     }
 
     const model = await prisma.model.update({
