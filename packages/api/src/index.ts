@@ -21,6 +21,7 @@ import { myUsageRoutes } from './routes/my-usage.routes.js';
 import { ratingRoutes } from './routes/rating.routes.js';
 import { serviceRoutes } from './routes/service.routes.js';
 import { holidaysRoutes } from './routes/holidays.routes.js';
+import { requestLogger } from './middleware/requestLogger.js';
 
 // Load environment variables
 import 'dotenv/config';
@@ -45,6 +46,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
+app.use(requestLogger);
 app.use(morgan('combined'));
 
 // Rate limiting
