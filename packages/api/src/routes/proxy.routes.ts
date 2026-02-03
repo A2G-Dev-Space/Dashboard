@@ -19,6 +19,7 @@ export const proxyRoutes = Router();
 interface EndpointInfo {
   endpointUrl: string;
   apiKey: string | null;
+  modelName: string;  // 엔드포인트별 모델명
 }
 
 /**
@@ -29,7 +30,7 @@ async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo):
   const subModels = await prisma.subModel.findMany({
     where: { parentId: modelId, enabled: true },
     orderBy: { sortOrder: 'asc' },
-    select: { endpointUrl: true, apiKey: true },
+    select: { endpointUrl: true, apiKey: true, modelName: true },
   });
 
   if (subModels.length === 0) {
@@ -37,7 +38,15 @@ async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo):
   }
 
   // parent도 엔드포인트 풀에 포함
-  return [parentEndpoint, ...subModels.map(s => ({ endpointUrl: s.endpointUrl, apiKey: s.apiKey }))];
+  // subModel.modelName이 null이면 parent.modelName 사용
+  return [
+    parentEndpoint,
+    ...subModels.map(s => ({
+      endpointUrl: s.endpointUrl,
+      apiKey: s.apiKey,
+      modelName: s.modelName || parentEndpoint.modelName,
+    })),
+  ];
 }
 
 /**
@@ -403,16 +412,16 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     const user = await getOrCreateUser(req);
 
     // 라운드로빈: parent + subModels에서 엔드포인트 선택
-    const endpoints = await getModelEndpoints(model.id, { endpointUrl: model.endpointUrl, apiKey: model.apiKey });
+    const endpoints = await getModelEndpoints(model.id, { endpointUrl: model.endpointUrl, apiKey: model.apiKey, modelName: model.name });
     const selectedEndpoint = await selectEndpointRoundRobin(model.id, endpoints);
 
     if (endpoints.length > 1) {
       console.log(`[RoundRobin] Model "${model.name}" has ${endpoints.length} endpoints, selected: ${selectedEndpoint.endpointUrl}`);
     }
 
-    // Prepare request to actual LLM
+    // Prepare request to actual LLM (선택된 엔드포인트의 modelName 사용)
     const llmRequestBody = {
-      model: model.name,
+      model: selectedEndpoint.modelName,
       messages,
       stream: stream || false,
       ...otherParams,

@@ -112,6 +112,7 @@ model Model {
 model SubModel {
   id          String   @id @default(uuid())
   parentId    String   @map("parent_id")
+  modelName   String?  @map("model_name")  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl String   @map("endpoint_url")
   apiKey      String?  @map("api_key")
   enabled     Boolean  @default(true)

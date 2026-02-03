@@ -186,6 +186,7 @@ interface CreateModelData {
 }
 
 interface CreateSubModelData {
+  modelName?: string;  // 엔드포인트별 모델명 (생략 시 parent.name 사용)
   endpointUrl: string;
   apiKey?: string;
   enabled?: boolean;

@@ -4,6 +4,7 @@ import { modelsApi, serviceApi } from '../services/api';
 
 interface SubModel {
   id: string;
+  modelName: string | null;  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl: string;
   apiKey: string | null;
   enabled: boolean;
@@ -387,6 +388,9 @@ export default function Models({ serviceId }: ModelsProps) {
                           <div key={sub.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200">
                             <div className="flex-1">
                               <span className="text-xs font-medium text-gray-500 mr-2">#{idx + 1}</span>
+                              {sub.modelName && (
+                                <span className="text-xs font-medium text-purple-600 mr-2">[{sub.modelName}]</span>
+                              )}
                               <span className="text-sm text-gray-700">{sub.endpointUrl}</span>
                               {sub.apiKey && (
                                 <span className="text-xs text-gray-400 ml-2">API Key: {sub.apiKey}</span>
@@ -740,6 +744,7 @@ interface SubModelModalProps {
 
 function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProps) {
   const [formData, setFormData] = useState({
+    modelName: subModel?.modelName || '',
     endpointUrl: subModel?.endpointUrl || '',
     apiKey: '',
     enabled: subModel?.enabled ?? true,
@@ -756,6 +761,7 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
     try {
       const data = {
         ...formData,
+        modelName: formData.modelName || undefined,
         apiKey: formData.apiKey || undefined,
       };
 
@@ -789,6 +795,20 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Model Name <span className="text-gray-400 font-normal">(선택)</span>
+            </label>
+            <input
+              type="text"
+              value={formData.modelName}
+              onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
+              placeholder="비워두면 Parent 모델명 사용"
+            />
+            <p className="text-xs text-gray-500 mt-1">이 엔드포인트에서 사용할 모델명 (예: GLM-4, gpt-4-turbo)</p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Endpoint URL

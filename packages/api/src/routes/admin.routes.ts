@@ -357,7 +357,7 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
         },
         subModels: {
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, endpointUrl: true, apiKey: true, enabled: true, sortOrder: true, createdAt: true },
+          select: { id: true, modelName: true, endpointUrl: true, apiKey: true, enabled: true, sortOrder: true, createdAt: true },
         },
       },
       orderBy: [
@@ -627,6 +627,7 @@ adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
 // ==================== SubModel Management (로드밸런싱) ====================
 
 const subModelSchema = z.object({
+  modelName: z.string().optional(),  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl: z.string().url(),
   apiKey: z.string().optional(),
   enabled: z.boolean().default(true),
@@ -716,11 +717,12 @@ adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest
       return;
     }
 
-    // Health check
+    // Health check (subModel의 modelName이 있으면 그걸 사용, 없으면 parent의 name)
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, model.name, validation.data.apiKey);
-      console.log(`[HealthCheck] SubModel for "${model.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+      const healthCheckModelName = validation.data.modelName || model.name;
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey);
+      console.log(`[HealthCheck] SubModel for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
         res.status(400).json({
@@ -794,13 +796,14 @@ adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: Authentic
       return;
     }
 
-    // Health check if endpointUrl or apiKey changed
+    // Health check if endpointUrl or apiKey changed (subModel의 modelName이 있으면 그걸 사용)
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck && (validation.data.endpointUrl || validation.data.apiKey)) {
       const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
       const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
-      const healthResult = await checkModelEndpointHealth(endpointUrl, model.name, apiKey);
-      console.log(`[HealthCheck] SubModel update for "${model.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+      const healthCheckModelName = validation.data.modelName || existing.modelName || model.name;
+      const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey);
+      console.log(`[HealthCheck] SubModel update for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
         res.status(400).json({
