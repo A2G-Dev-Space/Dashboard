@@ -421,6 +421,60 @@ function isRetryableError(error: unknown): boolean {
 }
 
 /**
+ * LLM 에러 상세 로그
+ * 디버깅을 위해 요청/응답 정보를 구조화하여 출력
+ */
+function logLLMError(
+  context: string,
+  url: string,
+  status: number,
+  errorBody: string,
+  requestBody: any,
+  user: { loginid: string; username: string; deptname: string },
+  model: { name: string },
+  serviceId: string | null
+) {
+  const requestBodyStr = JSON.stringify(requestBody);
+  const messages = requestBody.messages || [];
+  const tools = requestBody.tools || [];
+
+  // 메시지별 role과 content 길이
+  const messageSummary = messages.map((m: any, i: number) => {
+    const contentLen = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content || '').length;
+    const toolCalls = m.tool_calls ? ` tool_calls=${m.tool_calls.length}` : '';
+    return `  [${i}] role=${m.role} content_len=${contentLen}${toolCalls}`;
+  }).join('\n');
+
+  // tools 요약
+  const toolsSummary = tools.length > 0
+    ? tools.map((t: any, i: number) => {
+        const fn = t.function || t;
+        const paramLen = JSON.stringify(fn.parameters || {}).length;
+        return `  [${i}] ${fn.name || 'unknown'} params_len=${paramLen}`;
+      }).join('\n')
+    : '  (none)';
+
+  // LLM 응답 body (너무 길면 자름)
+  const maxErrorLen = 2000;
+  const truncatedError = errorBody.length > maxErrorLen
+    ? errorBody.substring(0, maxErrorLen) + `... (truncated, total ${errorBody.length} chars)`
+    : errorBody;
+
+  console.error(
+    `[LLM-Error] ${context}\n` +
+    `  User: ${user.loginid} (${user.username}, ${user.deptname})\n` +
+    `  Model: ${model.name} | Service: ${serviceId || 'none'}\n` +
+    `  URL: ${url}\n` +
+    `  Status: ${status}\n` +
+    `  Request Body Size: ${requestBodyStr.length} bytes\n` +
+    `  Messages (${messages.length}):\n${messageSummary}\n` +
+    `  Tools (${tools.length}):\n${toolsSummary}\n` +
+    `  stream: ${requestBody.stream || false} | max_tokens: ${requestBody.max_tokens || 'default'} | temperature: ${requestBody.temperature ?? 'default'}\n` +
+    `  LLM Response Body:\n${truncatedError}`
+  );
+}
+
+/**
  * Handle non-streaming chat completion
  */
 async function handleNonStreamingRequest(
@@ -460,7 +514,7 @@ async function handleNonStreamingRequest(
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('LLM error:', errorText);
+          logLLMError('Non-Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
 
           // max_tokens 에러는 재시도하지 않고 명확한 에러 반환
           if (response.status === 400 && isMaxTokensError(errorText)) {
@@ -601,7 +655,7 @@ async function handleStreamingRequest(
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('LLM streaming error:', errorText);
+        logLLMError('Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
 
         // max_tokens 에러는 재시도하지 않고 명확한 에러 반환
         if (response.status === 400 && isMaxTokensError(errorText)) {
