@@ -87,8 +87,36 @@ async function fetchWithTimeout(
 }
 
 /**
+ * Health Check 상세 로그 (요청/응답 전부 출력)
+ */
+function logHealthCheckDetail(
+  step: string,
+  modelName: string,
+  url: string,
+  requestBody: Record<string, unknown>,
+  result: { passed: boolean; status?: number; latencyMs: number },
+  responseBody?: string
+) {
+  const reqStr = JSON.stringify(requestBody, null, 2);
+  const maxLen = 2000;
+  const truncatedReq = reqStr.length > maxLen ? reqStr.substring(0, maxLen) + `... (${reqStr.length} chars)` : reqStr;
+  const truncatedRes = responseBody && responseBody.length > maxLen
+    ? responseBody.substring(0, maxLen) + `... (${responseBody.length} chars)`
+    : (responseBody || '(empty)');
+
+  console.log(
+    `[HealthCheck] ${step} ${result.passed ? '✅ PASS' : '❌ FAIL'} (${result.latencyMs}ms)\n` +
+    `  Model: ${modelName}\n` +
+    `  URL: ${url}\n` +
+    `  Status: ${result.status || 'N/A'}\n` +
+    `  Request:\n${truncatedReq}\n` +
+    `  Response:\n${truncatedRes}`
+  );
+}
+
+/**
  * 1단계: Chat Completion 테스트
- * 간단한 메시지를 보내서 정상 응답하는지 확인
+ * 메시지를 보내서 정상 응답하는지 확인 (응답 내용이 오면 OK)
  */
 async function testChatCompletion(
   url: string,
@@ -96,41 +124,61 @@ async function testChatCompletion(
   headers: Record<string, string>
 ): Promise<{ passed: boolean; status?: number; message: string; latencyMs: number }> {
   const startTime = Date.now();
+  const requestBody = {
+    model: modelName,
+    messages: [{ role: 'user', content: 'Say "ok" and nothing else.' }],
+    temperature: 0,
+  };
+
   try {
     const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: modelName,
-        messages: [{ role: 'user', content: 'Say "ok" and nothing else.' }],
-        max_tokens: 10,
-        temperature: 0,
-      }),
+      body: JSON.stringify(requestBody),
     }, HEALTH_CHECK_TIMEOUT_MS);
 
     const latencyMs = Date.now() - startTime;
+    const responseText = await response.text();
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
+      const result = { passed: false, status: response.status, message: '', latencyMs };
       if (response.status === 401 || response.status === 403) {
-        return { passed: false, status: response.status, message: `Authentication failed. Check API key. ${errorText}`.trim(), latencyMs };
+        result.message = `Authentication failed (${response.status}). Check API key.`;
+      } else {
+        result.message = `Chat completion failed with status ${response.status}`;
       }
-      return { passed: false, status: response.status, message: `Chat completion failed (${response.status}): ${errorText}`.trim(), latencyMs };
+      logHealthCheckDetail('Chat Completion', modelName, url, requestBody, result, responseText);
+      return result;
     }
 
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; [key: string]: unknown };
+    // 응답 파싱
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const result = { passed: false, status: response.status, message: 'Response is not valid JSON', latencyMs };
+      logHealthCheckDetail('Chat Completion', modelName, url, requestBody, result, responseText);
+      return result;
+    }
+
     const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      return { passed: false, status: response.status, message: 'Chat completion returned empty response', latencyMs };
+    if (!content && !data.choices?.[0]?.message) {
+      const result = { passed: false, status: response.status, message: 'No message in response choices', latencyMs };
+      logHealthCheckDetail('Chat Completion', modelName, url, requestBody, result, responseText);
+      return result;
     }
 
-    return { passed: true, status: response.status, message: `Chat completion OK: "${content.slice(0, 50)}"`, latencyMs };
+    const result = { passed: true, status: response.status, message: `OK: "${(content || '').slice(0, 100)}"`, latencyMs };
+    logHealthCheckDetail('Chat Completion', modelName, url, requestBody, result, responseText.length > 500 ? responseText.substring(0, 500) + '...' : responseText);
+    return result;
   } catch (error) {
     const latencyMs = Date.now() - startTime;
-    if (error instanceof Error && error.name === 'AbortError') {
-      return { passed: false, message: `Chat completion timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
-    }
-    return { passed: false, message: `Chat completion connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, latencyMs };
+    const errMsg = error instanceof Error
+      ? (error.name === 'AbortError' ? `Timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s` : `Connection failed: ${error.message}`)
+      : 'Unknown error';
+    const result = { passed: false, message: errMsg, latencyMs };
+    logHealthCheckDetail('Chat Completion', modelName, url, requestBody, result, errMsg);
+    return result;
   }
 }
 
@@ -144,53 +192,65 @@ async function testToolCall(
   headers: Record<string, string>
 ): Promise<{ passed: boolean; status?: number; message: string; latencyMs: number }> {
   const startTime = Date.now();
+  const requestBody = {
+    model: modelName,
+    messages: [{ role: 'user', content: 'What is the current time? Use the get_current_time tool.' }],
+    temperature: 0,
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'get_current_time',
+        description: 'Get the current time',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    }],
+    tool_choice: 'auto',
+  };
+
   try {
     const response = await fetchWithTimeout(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: modelName,
-        messages: [{ role: 'user', content: 'What is the current time? Use the get_current_time tool.' }],
-        max_tokens: 100,
-        temperature: 0,
-        tools: [{
-          type: 'function',
-          function: {
-            name: 'get_current_time',
-            description: 'Get the current time',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }],
-        tool_choice: 'auto',
-      }),
+      body: JSON.stringify(requestBody),
     }, HEALTH_CHECK_TIMEOUT_MS);
 
     const latencyMs = Date.now() - startTime;
+    const responseText = await response.text();
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      return { passed: false, status: response.status, message: `Tool call failed (${response.status}): ${errorText}`.trim(), latencyMs };
+      const result = { passed: false, status: response.status, message: `Tool call failed with status ${response.status}`, latencyMs };
+      logHealthCheckDetail('Tool Call', modelName, url, requestBody, result, responseText);
+      return result;
     }
 
-    const data = await response.json() as {
-      choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string } }> } }>;
-      [key: string]: unknown;
-    };
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      const result = { passed: false, status: response.status, message: 'Response is not valid JSON', latencyMs };
+      logHealthCheckDetail('Tool Call', modelName, url, requestBody, result, responseText);
+      return result;
+    }
 
     const toolCalls = data.choices?.[0]?.message?.tool_calls;
     if (toolCalls && toolCalls.length > 0) {
       const toolName = toolCalls[0]?.function?.name || 'unknown';
-      return { passed: true, status: response.status, message: `Tool call OK: called "${toolName}"`, latencyMs };
+      const result = { passed: true, status: response.status, message: `OK: called "${toolName}"`, latencyMs };
+      logHealthCheckDetail('Tool Call', modelName, url, requestBody, result, responseText.length > 500 ? responseText.substring(0, 500) + '...' : responseText);
+      return result;
     }
 
-    // tool_calls가 없더라도 응답 자체가 성공이면 tool call 미지원으로 간주
-    return { passed: false, status: response.status, message: 'Model responded but did not invoke tool call. Tool calling may not be supported.', latencyMs };
+    const result = { passed: false, status: response.status, message: 'Model responded but did not invoke tool call. Tool calling may not be supported.', latencyMs };
+    logHealthCheckDetail('Tool Call', modelName, url, requestBody, result, responseText);
+    return result;
   } catch (error) {
     const latencyMs = Date.now() - startTime;
-    if (error instanceof Error && error.name === 'AbortError') {
-      return { passed: false, message: `Tool call timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
-    }
-    return { passed: false, message: `Tool call connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, latencyMs };
+    const errMsg = error instanceof Error
+      ? (error.name === 'AbortError' ? `Timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s` : `Connection failed: ${error.message}`)
+      : 'Unknown error';
+    const result = { passed: false, message: errMsg, latencyMs };
+    logHealthCheckDetail('Tool Call', modelName, url, requestBody, result, errMsg);
+    return result;
   }
 }
 
