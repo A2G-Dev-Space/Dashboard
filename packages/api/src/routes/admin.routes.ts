@@ -355,6 +355,11 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
         service: {
           select: { id: true, name: true, displayName: true },
         },
+        subModels: {
+          where: { enabled: true },
+          orderBy: { sortOrder: 'asc' },
+          select: { id: true, endpointUrl: true, apiKey: true, enabled: true, sortOrder: true, createdAt: true },
+        },
       },
       orderBy: [
         { sortOrder: 'asc' },
@@ -362,10 +367,14 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
       ],
     });
 
-    // Mask API keys
+    // Mask API keys (parent and subModels)
     const maskedModels = models.map((m) => ({
       ...m,
       apiKey: m.apiKey ? '***' + m.apiKey.slice(-4) : null,
+      subModels: m.subModels.map((s) => ({
+        ...s,
+        apiKey: s.apiKey ? '***' + s.apiKey.slice(-4) : null,
+      })),
     }));
 
     res.json({ models: maskedModels });
@@ -613,6 +622,257 @@ adminRoutes.delete('/models/:id', async (req: AuthenticatedRequest, res) => {
   } catch (error) {
     console.error('Delete model error:', error);
     res.status(500).json({ error: 'Failed to delete model' });
+  }
+});
+
+// ==================== SubModel Management (로드밸런싱) ====================
+
+const subModelSchema = z.object({
+  endpointUrl: z.string().url(),
+  apiKey: z.string().optional(),
+  enabled: z.boolean().default(true),
+  sortOrder: z.number().int().default(0),
+});
+
+/**
+ * GET /admin/models/:modelId/sub-models
+ * 특정 모델의 서브모델 목록 조회
+ */
+adminRoutes.get('/models/:modelId/sub-models', async (req: AuthenticatedRequest, res) => {
+  try {
+    const { modelId } = req.params;
+
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
+      select: { id: true, serviceId: true },
+    });
+
+    if (!model) {
+      res.status(404).json({ error: 'Model not found' });
+      return;
+    }
+
+    // Check service access for non-global admins
+    if (model.serviceId) {
+      const accessibleServiceIds = await getAccessibleServiceIds(req);
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(model.serviceId)) {
+        res.status(403).json({ error: 'No access to this model' });
+        return;
+      }
+    }
+
+    const subModels = await prisma.subModel.findMany({
+      where: { parentId: modelId },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    // Mask API keys
+    const maskedSubModels = subModels.map((s) => ({
+      ...s,
+      apiKey: s.apiKey ? '***' + s.apiKey.slice(-4) : null,
+    }));
+
+    res.json({ subModels: maskedSubModels });
+  } catch (error) {
+    console.error('Get sub-models error:', error);
+    res.status(500).json({ error: 'Failed to get sub-models' });
+  }
+});
+
+/**
+ * POST /admin/models/:modelId/sub-models
+ * 서브모델 추가 (health check 포함)
+ */
+adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot create sub-models.' });
+      return;
+    }
+
+    const { modelId } = req.params;
+
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
+      select: { id: true, name: true, serviceId: true },
+    });
+
+    if (!model) {
+      res.status(404).json({ error: 'Model not found' });
+      return;
+    }
+
+    // Check service access
+    if (model.serviceId && req.adminRole === 'SERVICE_ADMIN') {
+      const accessibleServiceIds = await getAccessibleServiceIds(req);
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(model.serviceId)) {
+        res.status(403).json({ error: 'No access to add sub-models for this model' });
+        return;
+      }
+    }
+
+    const validation = subModelSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    // Health check
+    const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
+    if (!skipHealthCheck) {
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, model.name, validation.data.apiKey);
+      console.log(`[HealthCheck] SubModel for "${model.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+
+      if (!healthResult.healthy) {
+        res.status(400).json({
+          error: 'Endpoint health check failed',
+          healthCheck: healthResult,
+        });
+        return;
+      }
+    }
+
+    const subModel = await prisma.subModel.create({
+      data: {
+        parentId: modelId,
+        ...validation.data,
+      },
+    });
+
+    res.status(201).json({
+      subModel: {
+        ...subModel,
+        apiKey: subModel.apiKey ? '***' + subModel.apiKey.slice(-4) : null,
+      },
+    });
+  } catch (error) {
+    console.error('Create sub-model error:', error);
+    res.status(500).json({ error: 'Failed to create sub-model' });
+  }
+});
+
+/**
+ * PUT /admin/models/:modelId/sub-models/:subModelId
+ * 서브모델 수정
+ */
+adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot update sub-models.' });
+      return;
+    }
+
+    const { modelId, subModelId } = req.params;
+
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
+      select: { id: true, name: true, serviceId: true },
+    });
+
+    if (!model) {
+      res.status(404).json({ error: 'Model not found' });
+      return;
+    }
+
+    // Check service access
+    if (model.serviceId && req.adminRole === 'SERVICE_ADMIN') {
+      const accessibleServiceIds = await getAccessibleServiceIds(req);
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(model.serviceId)) {
+        res.status(403).json({ error: 'No access to update sub-models for this model' });
+        return;
+      }
+    }
+
+    const existing = await prisma.subModel.findUnique({ where: { id: subModelId } });
+    if (!existing || existing.parentId !== modelId) {
+      res.status(404).json({ error: 'Sub-model not found' });
+      return;
+    }
+
+    const validation = subModelSchema.partial().safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    // Health check if endpointUrl or apiKey changed
+    const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
+    if (!skipHealthCheck && (validation.data.endpointUrl || validation.data.apiKey)) {
+      const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
+      const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
+      const healthResult = await checkModelEndpointHealth(endpointUrl, model.name, apiKey);
+      console.log(`[HealthCheck] SubModel update for "${model.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+
+      if (!healthResult.healthy) {
+        res.status(400).json({
+          error: 'Endpoint health check failed',
+          healthCheck: healthResult,
+        });
+        return;
+      }
+    }
+
+    const subModel = await prisma.subModel.update({
+      where: { id: subModelId },
+      data: validation.data,
+    });
+
+    res.json({
+      subModel: {
+        ...subModel,
+        apiKey: subModel.apiKey ? '***' + subModel.apiKey.slice(-4) : null,
+      },
+    });
+  } catch (error) {
+    console.error('Update sub-model error:', error);
+    res.status(500).json({ error: 'Failed to update sub-model' });
+  }
+});
+
+/**
+ * DELETE /admin/models/:modelId/sub-models/:subModelId
+ * 서브모델 삭제
+ */
+adminRoutes.delete('/models/:modelId/sub-models/:subModelId', async (req: AuthenticatedRequest, res) => {
+  try {
+    if (['VIEWER', 'SERVICE_VIEWER'].includes(req.adminRole || '')) {
+      res.status(403).json({ error: 'Read-only access. Cannot delete sub-models.' });
+      return;
+    }
+
+    const { modelId, subModelId } = req.params;
+
+    const model = await prisma.model.findUnique({
+      where: { id: modelId },
+      select: { id: true, serviceId: true },
+    });
+
+    if (!model) {
+      res.status(404).json({ error: 'Model not found' });
+      return;
+    }
+
+    // Check service access
+    if (model.serviceId && req.adminRole === 'SERVICE_ADMIN') {
+      const accessibleServiceIds = await getAccessibleServiceIds(req);
+      if (accessibleServiceIds !== null && !accessibleServiceIds.includes(model.serviceId)) {
+        res.status(403).json({ error: 'No access to delete sub-models for this model' });
+        return;
+      }
+    }
+
+    const existing = await prisma.subModel.findUnique({ where: { id: subModelId } });
+    if (!existing || existing.parentId !== modelId) {
+      res.status(404).json({ error: 'Sub-model not found' });
+      return;
+    }
+
+    await prisma.subModel.delete({ where: { id: subModelId } });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Delete sub-model error:', error);
+    res.status(500).json({ error: 'Failed to delete sub-model' });
   }
 });
 

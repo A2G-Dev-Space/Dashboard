@@ -12,6 +12,54 @@ import { incrementUsage, trackActiveUser } from '../services/redis.service.js';
 
 export const proxyRoutes = Router();
 
+// ============================================
+// 라운드로빈 엔드포인트 선택
+// ============================================
+
+interface EndpointInfo {
+  endpointUrl: string;
+  apiKey: string | null;
+}
+
+/**
+ * 모델의 모든 엔드포인트 가져오기 (parent + subModels)
+ * subModels가 없으면 parent만 반환
+ */
+async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo): Promise<EndpointInfo[]> {
+  const subModels = await prisma.subModel.findMany({
+    where: { parentId: modelId, enabled: true },
+    orderBy: { sortOrder: 'asc' },
+    select: { endpointUrl: true, apiKey: true },
+  });
+
+  if (subModels.length === 0) {
+    return [parentEndpoint];
+  }
+
+  // parent도 엔드포인트 풀에 포함
+  return [parentEndpoint, ...subModels.map(s => ({ endpointUrl: s.endpointUrl, apiKey: s.apiKey }))];
+}
+
+/**
+ * 라운드로빈으로 다음 엔드포인트 선택
+ * Redis에 인덱스 저장하여 서버 재시작에도 유지
+ */
+async function selectEndpointRoundRobin(modelId: string, endpoints: EndpointInfo[]): Promise<EndpointInfo> {
+  if (endpoints.length === 1) {
+    return endpoints[0]!;
+  }
+
+  const key = `model_rr:${modelId}`;
+  const index = await redis.incr(key);
+  // 첫 요청이면 expire 설정 (7일)
+  if (index === 1) {
+    await redis.expire(key, 7 * 24 * 60 * 60);
+  }
+
+  const selectedIndex = (index - 1) % endpoints.length;
+  return endpoints[selectedIndex]!;
+}
+
 // 기본 사용자 정보 (폐쇄망에서 인증 없이 사용 시)
 const DEFAULT_USER = {
   loginid: 'anonymous',
@@ -347,6 +395,14 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     // Get or create user for usage tracking
     const user = await getOrCreateUser(req);
 
+    // 라운드로빈: parent + subModels에서 엔드포인트 선택
+    const endpoints = await getModelEndpoints(model.id, { endpointUrl: model.endpointUrl, apiKey: model.apiKey });
+    const selectedEndpoint = await selectEndpointRoundRobin(model.id, endpoints);
+
+    if (endpoints.length > 1) {
+      console.log(`[RoundRobin] Model "${model.name}" has ${endpoints.length} endpoints, selected: ${selectedEndpoint.endpointUrl}`);
+    }
+
     // Prepare request to actual LLM
     const llmRequestBody = {
       model: model.name,
@@ -359,15 +415,22 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
       'Content-Type': 'application/json',
     };
 
-    if (model.apiKey) {
-      headers['Authorization'] = `Bearer ${model.apiKey}`;
+    if (selectedEndpoint.apiKey) {
+      headers['Authorization'] = `Bearer ${selectedEndpoint.apiKey}`;
     }
+
+    // 실제 요청에 사용할 모델 정보 (선택된 엔드포인트 사용)
+    const effectiveModel = {
+      ...model,
+      endpointUrl: selectedEndpoint.endpointUrl,
+      apiKey: selectedEndpoint.apiKey,
+    };
 
     // Handle streaming
     if (stream) {
-      await handleStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
+      await handleStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
     } else {
-      await handleNonStreamingRequest(res, model, llmRequestBody, headers, user, serviceId);
+      await handleNonStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
     }
 
   } catch (error) {
