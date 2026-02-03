@@ -41,70 +41,206 @@ adminRoutes.use(requireAdmin as RequestHandler);
 
 /**
  * 모델 엔드포인트 Health Check
- * endpointUrl + apiKey로 실제 LLM 서버에 연결 가능한지 확인
- * /v1/models 또는 /chat/completions에 간단한 요청을 보내서 확인
+ * 실제 chat completion 및 tool call 요청을 보내서 정상 동작 확인
  */
-const HEALTH_CHECK_TIMEOUT_MS = 10000; // 10초
+const HEALTH_CHECK_TIMEOUT_MS = 30000; // 30초 (실제 LLM 응답 대기)
 
+interface HealthCheckResult {
+  healthy: boolean;
+  checks: {
+    chatCompletion: { passed: boolean; status?: number; message: string; latencyMs: number };
+    toolCall: { passed: boolean; status?: number; message: string; latencyMs: number };
+  };
+  message: string;
+  totalLatencyMs: number;
+}
+
+/**
+ * endpointUrl에서 chat completions URL 구성
+ */
+function buildHealthCheckUrl(endpointUrl: string): string {
+  let url = endpointUrl.trim().replace(/\/+$/, '');
+  if (url.endsWith('/chat/completions')) return url;
+  if (url.endsWith('/completions')) return url.replace(/\/completions$/, '/chat/completions');
+  if (url.endsWith('/v1')) return `${url}/chat/completions`;
+  return `${url}/chat/completions`;
+}
+
+/**
+ * fetch 요청 with timeout
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<globalThis.Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
+  }
+}
+
+/**
+ * 1단계: Chat Completion 테스트
+ * 간단한 메시지를 보내서 정상 응답하는지 확인
+ */
+async function testChatCompletion(
+  url: string,
+  modelName: string,
+  headers: Record<string, string>
+): Promise<{ passed: boolean; status?: number; message: string; latencyMs: number }> {
+  const startTime = Date.now();
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: 'user', content: 'Say "ok" and nothing else.' }],
+        max_tokens: 10,
+        temperature: 0,
+      }),
+    }, HEALTH_CHECK_TIMEOUT_MS);
+
+    const latencyMs = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      if (response.status === 401 || response.status === 403) {
+        return { passed: false, status: response.status, message: `Authentication failed. Check API key. ${errorText}`.trim(), latencyMs };
+      }
+      return { passed: false, status: response.status, message: `Chat completion failed (${response.status}): ${errorText}`.trim(), latencyMs };
+    }
+
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }>; [key: string]: unknown };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) {
+      return { passed: false, status: response.status, message: 'Chat completion returned empty response', latencyMs };
+    }
+
+    return { passed: true, status: response.status, message: `Chat completion OK: "${content.slice(0, 50)}"`, latencyMs };
+  } catch (error) {
+    const latencyMs = Date.now() - startTime;
+    if (error instanceof Error && error.name === 'AbortError') {
+      return { passed: false, message: `Chat completion timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
+    }
+    return { passed: false, message: `Chat completion connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, latencyMs };
+  }
+}
+
+/**
+ * 2단계: Tool Call 테스트
+ * 간단한 tool을 정의하고 호출되는지 확인
+ */
+async function testToolCall(
+  url: string,
+  modelName: string,
+  headers: Record<string, string>
+): Promise<{ passed: boolean; status?: number; message: string; latencyMs: number }> {
+  const startTime = Date.now();
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: modelName,
+        messages: [{ role: 'user', content: 'What is the current time? Use the get_current_time tool.' }],
+        max_tokens: 100,
+        temperature: 0,
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'get_current_time',
+            description: 'Get the current time',
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
+        }],
+        tool_choice: 'auto',
+      }),
+    }, HEALTH_CHECK_TIMEOUT_MS);
+
+    const latencyMs = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      return { passed: false, status: response.status, message: `Tool call failed (${response.status}): ${errorText}`.trim(), latencyMs };
+    }
+
+    const data = await response.json() as {
+      choices?: Array<{ message?: { tool_calls?: Array<{ function?: { name?: string } }> } }>;
+      [key: string]: unknown;
+    };
+
+    const toolCalls = data.choices?.[0]?.message?.tool_calls;
+    if (toolCalls && toolCalls.length > 0) {
+      const toolName = toolCalls[0]?.function?.name || 'unknown';
+      return { passed: true, status: response.status, message: `Tool call OK: called "${toolName}"`, latencyMs };
+    }
+
+    // tool_calls가 없더라도 응답 자체가 성공이면 tool call 미지원으로 간주
+    return { passed: false, status: response.status, message: 'Model responded but did not invoke tool call. Tool calling may not be supported.', latencyMs };
+  } catch (error) {
+    const latencyMs = Date.now() - startTime;
+    if (error instanceof Error && error.name === 'AbortError') {
+      return { passed: false, message: `Tool call timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
+    }
+    return { passed: false, message: `Tool call connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`, latencyMs };
+  }
+}
+
+/**
+ * 전체 Health Check 실행
+ * chatCompletion → toolCall 순서로 테스트
+ * chatCompletion 실패 시 toolCall은 건너뜀
+ */
 async function checkModelEndpointHealth(
   endpointUrl: string,
+  modelName: string,
   apiKey?: string
-): Promise<{ healthy: boolean; status?: number; message: string; latencyMs: number }> {
-  const startTime = Date.now();
-
-  // endpointUrl에서 base URL 추출 (/chat/completions, /v1 등 제거)
-  let baseUrl = endpointUrl.trim().replace(/\/+$/, '');
-  // /chat/completions 제거
-  if (baseUrl.endsWith('/chat/completions')) {
-    baseUrl = baseUrl.replace(/\/chat\/completions$/, '');
-  }
-  // /completions 제거
-  if (baseUrl.endsWith('/completions')) {
-    baseUrl = baseUrl.replace(/\/completions$/, '');
-  }
+): Promise<HealthCheckResult> {
+  const totalStart = Date.now();
+  const url = buildHealthCheckUrl(endpointUrl);
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT_MS);
+  // 1단계: Chat Completion 테스트
+  const chatResult = await testChatCompletion(url, modelName, headers);
+  console.log(`[HealthCheck] Chat Completion: ${chatResult.passed ? 'PASS' : 'FAIL'} (${chatResult.latencyMs}ms) ${chatResult.message}`);
 
-  try {
-    // 1차: GET /v1/models (또는 base/models) 시도
-    const modelsUrl = baseUrl.endsWith('/v1') ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
-    const response = await fetch(modelsUrl, {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-    const latencyMs = Date.now() - startTime;
-
-    if (response.ok) {
-      return { healthy: true, status: response.status, message: 'Endpoint is reachable', latencyMs };
-    }
-
-    // 401/403은 인증 문제지만 서버는 살아있음
-    if (response.status === 401 || response.status === 403) {
-      return { healthy: false, status: response.status, message: 'Endpoint reachable but authentication failed. Check API key.', latencyMs };
-    }
-
-    return { healthy: true, status: response.status, message: `Endpoint responded with status ${response.status}`, latencyMs };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    const latencyMs = Date.now() - startTime;
-
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        return { healthy: false, message: `Connection timed out after ${HEALTH_CHECK_TIMEOUT_MS / 1000}s`, latencyMs };
-      }
-      return { healthy: false, message: `Connection failed: ${error.message}`, latencyMs };
-    }
-    return { healthy: false, message: 'Connection failed: Unknown error', latencyMs };
+  if (!chatResult.passed) {
+    return {
+      healthy: false,
+      checks: {
+        chatCompletion: chatResult,
+        toolCall: { passed: false, message: 'Skipped (chat completion failed)', latencyMs: 0 },
+      },
+      message: `Chat completion failed: ${chatResult.message}`,
+      totalLatencyMs: Date.now() - totalStart,
+    };
   }
+
+  // 2단계: Tool Call 테스트
+  const toolResult = await testToolCall(url, modelName, headers);
+  console.log(`[HealthCheck] Tool Call: ${toolResult.passed ? 'PASS' : 'FAIL'} (${toolResult.latencyMs}ms) ${toolResult.message}`);
+
+  const allPassed = chatResult.passed && toolResult.passed;
+  return {
+    healthy: allPassed,
+    checks: { chatCompletion: chatResult, toolCall: toolResult },
+    message: allPassed
+      ? 'All checks passed'
+      : `Tool call check failed: ${toolResult.message}`,
+    totalLatencyMs: Date.now() - totalStart,
+  };
 }
 
 const modelSchema = z.object({
@@ -212,8 +348,8 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
     // Health check: 엔드포인트 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.apiKey);
-      console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.latencyMs}ms) ${healthResult.message}`);
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey);
+      console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
         res.status(400).json({
@@ -338,8 +474,9 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
       if (existing) {
         const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
         const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
-        const healthResult = await checkModelEndpointHealth(endpointUrl, apiKey);
-        console.log(`[HealthCheck] Model "${existing.name}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.latencyMs}ms) ${healthResult.message}`);
+        const modelName = validation.data.name || existing.name;
+        const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey);
+        console.log(`[HealthCheck] Model "${modelName}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
         if (!healthResult.healthy) {
           res.status(400).json({
