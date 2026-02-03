@@ -204,7 +204,7 @@ async function testToolCall(
         parameters: { type: 'object', properties: {}, required: [] },
       },
     }],
-    tool_choice: 'auto',
+    tool_choice: 'required',
   };
 
   try {
