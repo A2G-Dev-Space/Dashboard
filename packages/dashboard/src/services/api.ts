@@ -63,6 +63,13 @@ export const modelsApi = {
   delete: (id: string, force = false) => api.delete(`/admin/models/${id}`, { params: { force } }),
   reorder: (modelIds: string[]) => api.put('/admin/models/reorder', { modelIds }),
   businessUnits: () => api.get('/admin/business-units'),
+  // SubModel API (로드밸런싱)
+  listSubModels: (modelId: string) => api.get(`/admin/models/${modelId}/sub-models`),
+  createSubModel: (modelId: string, data: CreateSubModelData) => api.post(`/admin/models/${modelId}/sub-models`, data),
+  updateSubModel: (modelId: string, subModelId: string, data: Partial<CreateSubModelData>) =>
+    api.put(`/admin/models/${modelId}/sub-models/${subModelId}`, data),
+  deleteSubModel: (modelId: string, subModelId: string) =>
+    api.delete(`/admin/models/${modelId}/sub-models/${subModelId}`),
 };
 
 export const usersApi = {
@@ -176,6 +183,13 @@ interface CreateModelData {
   enabled?: boolean;
   serviceId?: string;
   allowedBusinessUnits?: string[];
+}
+
+interface CreateSubModelData {
+  endpointUrl: string;
+  apiKey?: string;
+  enabled?: boolean;
+  sortOrder?: number;
 }
 
 interface CreateServiceData {

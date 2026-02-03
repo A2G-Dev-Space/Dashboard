@@ -1,6 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X, GripVertical } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
+
+interface SubModel {
+  id: string;
+  endpointUrl: string;
+  apiKey: string | null;
+  enabled: boolean;
+  sortOrder: number;
+  createdAt: string;
+}
 
 interface Model {
   id: string;
@@ -16,6 +25,7 @@ interface Model {
   serviceId?: string;
   service?: { id: string; name: string; displayName: string };
   allowedBusinessUnits?: string[];
+  subModels?: SubModel[];
 }
 
 interface ServiceInfo {
@@ -38,6 +48,11 @@ export default function Models({ serviceId }: ModelsProps) {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const dragRef = useRef<HTMLTableRowElement | null>(null);
+
+  // SubModel 관리
+  const [expandedModelId, setExpandedModelId] = useState<string | null>(null);
+  const [showSubModelModal, setShowSubModelModal] = useState(false);
+  const [editingSubModel, setEditingSubModel] = useState<{ modelId: string; subModel: SubModel | null } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -233,8 +248,8 @@ export default function Models({ serviceId }: ModelsProps) {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {models.map((model, index) => (
+              <React.Fragment key={model.id}>
               <tr
-                key={model.id}
                 ref={draggedIndex === index ? dragRef : null}
                 draggable
                 onDragStart={(e) => handleDragStart(e, index)}
@@ -310,6 +325,16 @@ export default function Models({ serviceId }: ModelsProps) {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <button
+                    onClick={() => {
+                      setEditingSubModel({ modelId: model.id, subModel: null });
+                      setShowSubModelModal(true);
+                    }}
+                    className="p-2 text-gray-400 hover:text-green-600 transition-colors"
+                    title="Add SubModel (로드밸런싱)"
+                  >
+                    <Layers className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => handleEdit(model)}
                     className="p-2 text-gray-400 hover:text-samsung-blue transition-colors"
                     title="Edit"
@@ -325,6 +350,97 @@ export default function Models({ serviceId }: ModelsProps) {
                   </button>
                 </td>
               </tr>
+              {/* SubModels 확장 행 */}
+              {model.subModels && model.subModels.length > 0 && (
+                <tr className="bg-gray-50">
+                  <td></td>
+                  <td colSpan={6} className="px-6 py-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => setExpandedModelId(expandedModelId === model.id ? null : model.id)}
+                        className="flex items-center gap-1 text-sm text-gray-600 hover:text-samsung-blue"
+                      >
+                        {expandedModelId === model.id ? (
+                          <ChevronDown className="w-4 h-4" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4" />
+                        )}
+                        <Layers className="w-4 h-4" />
+                        <span className="font-medium">서브모델 {model.subModels.length}개</span>
+                        <span className="text-xs text-gray-400">(라운드로빈 로드밸런싱)</span>
+                      </button>
+                    </div>
+                    {expandedModelId === model.id && (
+                      <div className="space-y-2 pl-6">
+                        {/* Parent endpoint 표시 */}
+                        <div className="flex items-center justify-between p-2 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="flex-1">
+                            <span className="text-xs font-medium text-blue-600 mr-2">Parent</span>
+                            <span className="text-sm text-gray-700">{model.endpointUrl}</span>
+                            {model.apiKey && (
+                              <span className="text-xs text-gray-400 ml-2">API Key: {model.apiKey}</span>
+                            )}
+                          </div>
+                        </div>
+                        {/* SubModels */}
+                        {model.subModels.map((sub, idx) => (
+                          <div key={sub.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-gray-200">
+                            <div className="flex-1">
+                              <span className="text-xs font-medium text-gray-500 mr-2">#{idx + 1}</span>
+                              <span className="text-sm text-gray-700">{sub.endpointUrl}</span>
+                              {sub.apiKey && (
+                                <span className="text-xs text-gray-400 ml-2">API Key: {sub.apiKey}</span>
+                              )}
+                              {!sub.enabled && (
+                                <span className="ml-2 px-1.5 py-0.5 text-xs bg-gray-200 text-gray-600 rounded">Disabled</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setEditingSubModel({ modelId: model.id, subModel: sub });
+                                  setShowSubModelModal(true);
+                                }}
+                                className="p-1.5 text-gray-400 hover:text-samsung-blue transition-colors"
+                                title="Edit SubModel"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('이 서브모델을 삭제하시겠습니까?')) return;
+                                  try {
+                                    await modelsApi.deleteSubModel(model.id, sub.id);
+                                    loadData();
+                                  } catch (err) {
+                                    console.error('Failed to delete sub-model:', err);
+                                    alert('서브모델 삭제에 실패했습니다.');
+                                  }
+                                }}
+                                className="p-1.5 text-gray-400 hover:text-red-600 transition-colors"
+                                title="Delete SubModel"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => {
+                            setEditingSubModel({ modelId: model.id, subModel: null });
+                            setShowSubModelModal(true);
+                          }}
+                          className="flex items-center gap-1 text-sm text-samsung-blue hover:text-samsung-blue-dark"
+                        >
+                          <Plus className="w-4 h-4" />
+                          서브모델 추가
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             ))}
             {models.length === 0 && (
               <tr>
@@ -345,6 +461,23 @@ export default function Models({ serviceId }: ModelsProps) {
           onClose={() => setShowModal(false)}
           onSave={() => {
             setShowModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {/* SubModel Modal */}
+      {showSubModelModal && editingSubModel && (
+        <SubModelModal
+          modelId={editingSubModel.modelId}
+          subModel={editingSubModel.subModel}
+          onClose={() => {
+            setShowSubModelModal(false);
+            setEditingSubModel(null);
+          }}
+          onSave={() => {
+            setShowSubModelModal(false);
+            setEditingSubModel(null);
             loadData();
           }}
         />
@@ -588,6 +721,148 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
               className="px-4 py-2 bg-samsung-blue text-white rounded-xl hover:bg-samsung-blue-dark disabled:opacity-50 transition-colors"
             >
               {loading ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==================== SubModel Modal ====================
+
+interface SubModelModalProps {
+  modelId: string;
+  subModel: SubModel | null;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProps) {
+  const [formData, setFormData] = useState({
+    endpointUrl: subModel?.endpointUrl || '',
+    apiKey: '',
+    enabled: subModel?.enabled ?? true,
+    sortOrder: subModel?.sortOrder || 0,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const data = {
+        ...formData,
+        apiKey: formData.apiKey || undefined,
+      };
+
+      if (subModel) {
+        await modelsApi.updateSubModel(modelId, subModel.id, data);
+      } else {
+        await modelsApi.createSubModel(modelId, data);
+      }
+      onSave();
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { error?: string; healthCheck?: { message?: string } } } };
+      const healthCheckMsg = axiosError.response?.data?.healthCheck?.message;
+      const errorMsg = axiosError.response?.data?.error;
+      setError(healthCheckMsg || errorMsg || '서브모델 저장에 실패했습니다.');
+      console.error('Save sub-model error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {subModel ? '서브모델 수정' : '서브모델 추가'}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            라운드로빈 로드밸런싱을 위한 추가 엔드포인트
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Endpoint URL
+            </label>
+            <input
+              type="url"
+              value={formData.endpointUrl}
+              onChange={(e) => setFormData({ ...formData, endpointUrl: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
+              placeholder="https://api.example.com/v1/chat/completions"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              API Key {subModel && '(비워두면 기존 유지)'}
+            </label>
+            <input
+              type="password"
+              value={formData.apiKey}
+              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
+              placeholder="sk-..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              정렬 순서
+            </label>
+            <input
+              type="number"
+              value={formData.sortOrder}
+              onChange={(e) => setFormData({ ...formData, sortOrder: parseInt(e.target.value) || 0 })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
+              min={0}
+            />
+            <p className="text-xs text-gray-500 mt-1">낮을수록 먼저 선택됩니다 (Parent는 항상 0순위)</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="submodel-enabled"
+              checked={formData.enabled}
+              onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+              className="w-4 h-4 text-samsung-blue rounded focus:ring-samsung-blue"
+            />
+            <label htmlFor="submodel-enabled" className="text-sm text-gray-700">
+              활성화
+            </label>
+          </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{error}</p>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 bg-samsung-blue text-white rounded-xl hover:bg-samsung-blue-dark disabled:opacity-50 transition-colors"
+            >
+              {loading ? '저장 중...' : '저장'}
             </button>
           </div>
         </form>
