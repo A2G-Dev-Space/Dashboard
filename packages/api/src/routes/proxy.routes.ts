@@ -43,21 +43,28 @@ async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo):
 /**
  * 라운드로빈으로 다음 엔드포인트 선택
  * Redis에 인덱스 저장하여 서버 재시작에도 유지
+ * Redis 실패 시 첫 번째 엔드포인트(parent) 사용
  */
 async function selectEndpointRoundRobin(modelId: string, endpoints: EndpointInfo[]): Promise<EndpointInfo> {
   if (endpoints.length === 1) {
     return endpoints[0]!;
   }
 
-  const key = `model_rr:${modelId}`;
-  const index = await redis.incr(key);
-  // 첫 요청이면 expire 설정 (7일)
-  if (index === 1) {
-    await redis.expire(key, 7 * 24 * 60 * 60);
-  }
+  try {
+    const key = `model_rr:${modelId}`;
+    const index = await redis.incr(key);
+    // 첫 요청이면 expire 설정 (7일)
+    if (index === 1) {
+      await redis.expire(key, 7 * 24 * 60 * 60);
+    }
 
-  const selectedIndex = (index - 1) % endpoints.length;
-  return endpoints[selectedIndex]!;
+    const selectedIndex = (index - 1) % endpoints.length;
+    return endpoints[selectedIndex]!;
+  } catch (error) {
+    // Redis 실패 시 첫 번째 엔드포인트(parent) 사용
+    console.error('[RoundRobin] Redis error, falling back to parent endpoint:', error);
+    return endpoints[0]!;
+  }
 }
 
 // 기본 사용자 정보 (폐쇄망에서 인증 없이 사용 시)
