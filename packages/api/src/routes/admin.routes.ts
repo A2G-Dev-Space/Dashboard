@@ -356,7 +356,6 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
           select: { id: true, name: true, displayName: true },
         },
         subModels: {
-          where: { enabled: true },
           orderBy: { sortOrder: 'asc' },
           select: { id: true, endpointUrl: true, apiKey: true, enabled: true, sortOrder: true, createdAt: true },
         },
