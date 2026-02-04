@@ -172,6 +172,8 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
     }
     try {
       await llmTestApi.deletePair(pairId);
+      setSelectedPairIds(prev => prev.filter(id => id !== pairId));
+      if (expandedPairId === pairId) setExpandedPairId(null);
       await loadData();
     } catch (error) {
       console.error('Failed to delete pair:', error);
@@ -270,7 +272,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
     }
   };
 
-  const getPairColor = (index: number) => PAIR_COLORS[index % PAIR_COLORS.length];
+  const getPairColor = (index: number) => PAIR_COLORS[Math.abs(index) % PAIR_COLORS.length];
 
   if (loading) {
     return (

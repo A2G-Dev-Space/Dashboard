@@ -22,6 +22,7 @@ import { ratingRoutes } from './routes/rating.routes.js';
 import { serviceRoutes } from './routes/service.routes.js';
 import { holidaysRoutes } from './routes/holidays.routes.js';
 import { llmTestRoutes } from './routes/llm-test.routes.js';
+import { startLLMTestScheduler, stopLLMTestScheduler } from './services/llm-test.service.js';
 import { requestLogger } from './middleware/requestLogger.js';
 
 // Load environment variables
@@ -95,6 +96,7 @@ app.use((_req, res) => {
 // Graceful shutdown
 async function shutdown() {
   console.log('Shutting down gracefully...');
+  stopLLMTestScheduler();
   await prisma.$disconnect();
   await redis.quit();
   process.exit(0);
@@ -144,6 +146,9 @@ async function main() {
     app.listen(PORT, () => {
       console.log(`AX Portal API server running on port ${PORT}`);
     });
+
+    // Start LLM test scheduler
+    startLLMTestScheduler();
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
