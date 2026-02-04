@@ -6,8 +6,13 @@ version: '3.8'
 # 환경 변수는 .env 파일에서 설정합니다
 # cp .env.example .env
 
+# 타임존 설정 (KST)
+x-timezone: &timezone
+  TZ: Asia/Seoul
+
 # 사내 네트워크 프록시 설정
 x-proxy-env: &proxy-env
+  <<: *timezone
   HTTP_PROXY: "${HTTP_PROXY:-}"
   HTTPS_PROXY: "${HTTPS_PROXY:-}"
   NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
@@ -23,6 +28,7 @@ services:
     container_name: dashboard-db
     restart: unless-stopped
     environment:
+      <<: *timezone
       POSTGRES_DB: ${POSTGRES_DB:-nexuscoder}
       POSTGRES_USER: ${POSTGRES_USER:-nexuscoder}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexuscoder123}
@@ -41,6 +47,8 @@ services:
     image: redis:7-alpine
     container_name: dashboard-redis
     restart: unless-stopped
+    environment:
+      <<: *timezone
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -109,6 +117,8 @@ services:
     image: nginx:alpine
     container_name: dashboard-proxy
     restart: unless-stopped
+    environment:
+      <<: *timezone
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       # VitePress 빌드 결과물 (docs-site/.vitepress/dist)

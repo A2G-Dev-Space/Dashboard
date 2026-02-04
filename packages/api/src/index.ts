@@ -21,6 +21,7 @@ import { myUsageRoutes } from './routes/my-usage.routes.js';
 import { ratingRoutes } from './routes/rating.routes.js';
 import { serviceRoutes } from './routes/service.routes.js';
 import { holidaysRoutes } from './routes/holidays.routes.js';
+import { llmTestRoutes } from './routes/llm-test.routes.js';
 import { requestLogger } from './middleware/requestLogger.js';
 
 // Load environment variables
@@ -72,6 +73,7 @@ app.use('/feedback', feedbackRoutes);
 app.use('/my-usage', myUsageRoutes);
 app.use('/rating', ratingRoutes);
 app.use('/holidays', holidaysRoutes);
+app.use('/llm-test', llmTestRoutes);
 
 // LLM Proxy Routes (OpenAI-compatible)
 app.use('/v1', proxyRoutes);

@@ -10,6 +10,7 @@ import Feedback from './pages/Feedback';
 import MyUsage from './pages/MyUsage';
 import Login from './pages/Login';
 import Holidays from './pages/Holidays';
+import LLMTest from './pages/LLMTest';
 import { authApi } from './services/api';
 
 interface User {
@@ -119,6 +120,11 @@ function App() {
             {/* 휴일 관리 (SUPER_ADMIN만) */}
             {adminRole === 'SUPER_ADMIN' && (
               <Route path="/holidays" element={<Holidays />} />
+            )}
+
+            {/* LLM 테스트 (SUPER_ADMIN만) */}
+            {adminRole === 'SUPER_ADMIN' && (
+              <Route path="/llm-test" element={<LLMTest />} />
             )}
 
             {/* 서비스별 라우트 */}

@@ -337,3 +337,65 @@ model RatingFeedback {
   @@index([serviceId])
   @@map("rating_feedbacks")
 }
+
+// ============================================
+// LLM 테스트 쌍 (질문자 LLM + 테스트 LLM)
+// ============================================
+model LLMTestPair {
+  id              String   @id @default(uuid())
+  name            String                          // 테스트 쌍 이름
+  enabled         Boolean  @default(true)
+  intervalMinutes Int      @default(5) @map("interval_minutes")  // 테스트 주기 (분)
+
+  // 질문자 LLM 설정
+  questionerModelName String  @map("questioner_model_name")
+  questionerEndpoint  String  @map("questioner_endpoint")
+  questionerApiKey    String? @map("questioner_api_key")
+
+  // 테스트 대상 LLM 설정
+  testModelName String  @map("test_model_name")
+  testEndpoint  String  @map("test_endpoint")
+  testApiKey    String? @map("test_api_key")
+
+  // 질문 생성 프롬프트 (질문자에게 보낼 프롬프트)
+  questionPrompt String @default("Generate a short, creative question that tests the AI's knowledge, reasoning, or problem-solving ability. The question should be clear and answerable.") @map("question_prompt")
+
+  // 평가 프롬프트 (질문자가 응답을 평가할 때 사용)
+  evaluationPrompt String @default("Evaluate the AI response based on: accuracy (is it correct?), helpfulness (does it answer the question?), and clarity (is it well-explained?). Score from 1-100.") @map("evaluation_prompt")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  lastRunAt DateTime? @map("last_run_at")
+
+  // Relations
+  results LLMTestResult[]
+
+  @@index([enabled])
+  @@map("llm_test_pairs")
+}
+
+// ============================================
+// LLM 테스트 결과
+// ============================================
+model LLMTestResult {
+  id        String   @id @default(uuid())
+  pairId    String   @map("pair_id")
+  timestamp DateTime @default(now())
+
+  // 테스트 결과
+  latencyMs Int      @map("latency_ms")   // 테스트 LLM 응답 시간 (ms)
+  score     Int?                          // 질문자가 매긴 점수 (1-100)
+
+  // 상태
+  status    String   @default("SUCCESS")  // SUCCESS, ERROR, TIMEOUT
+
+  // 오류 메시지 (실패 시)
+  errorMessage String? @map("error_message")
+
+  // Relations
+  pair LLMTestPair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+
+  @@index([pairId])
+  @@index([timestamp])
+  @@map("llm_test_results")
+}

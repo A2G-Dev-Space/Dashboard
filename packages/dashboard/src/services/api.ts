@@ -201,6 +201,93 @@ interface CreateServiceData {
   enabled?: boolean;
 }
 
+// LLM 테스트 API
+export interface LLMTestPair {
+  id: string;
+  name: string;
+  enabled: boolean;
+  intervalMinutes: number;
+  questionerModelName: string;
+  questionerEndpoint: string;
+  questionerApiKey: string | null;
+  testModelName: string;
+  testEndpoint: string;
+  testApiKey: string | null;
+  questionPrompt: string;
+  evaluationPrompt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt: string | null;
+  _count?: { results: number };
+}
+
+export interface LLMTestResult {
+  id: string;
+  pairId: string;
+  timestamp: string;
+  latencyMs: number;
+  score: number | null;
+  status: string;
+  errorMessage: string | null;
+  pair?: {
+    id: string;
+    name: string;
+    testModelName: string;
+  };
+}
+
+export interface CreateLLMTestPairData {
+  name: string;
+  enabled?: boolean;
+  intervalMinutes?: number;
+  questionerModelName: string;
+  questionerEndpoint: string;
+  questionerApiKey?: string;
+  testModelName: string;
+  testEndpoint: string;
+  testApiKey?: string;
+  questionPrompt?: string;
+  evaluationPrompt?: string;
+}
+
+export const llmTestApi = {
+  // 테스트 쌍 관리
+  listPairs: () =>
+    api.get<{ pairs: LLMTestPair[] }>('/llm-test/pairs'),
+  getPair: (id: string) =>
+    api.get<{ pair: LLMTestPair }>(`/llm-test/pairs/${id}`),
+  createPair: (data: CreateLLMTestPairData) =>
+    api.post<{ pair: LLMTestPair }>('/llm-test/pairs', data),
+  updatePair: (id: string, data: Partial<CreateLLMTestPairData>) =>
+    api.put<{ pair: LLMTestPair }>(`/llm-test/pairs/${id}`, data),
+  deletePair: (id: string) =>
+    api.delete<{ message: string }>(`/llm-test/pairs/${id}`),
+
+  // 테스트 실행
+  runTest: (pairId: string) =>
+    api.post<{ result: LLMTestResult }>(`/llm-test/pairs/${pairId}/run`),
+
+  // 결과 조회
+  getResults: (pairId: string, params?: { limit?: number; offset?: number; days?: number }) =>
+    api.get<{ results: LLMTestResult[]; total: number }>(`/llm-test/pairs/${pairId}/results`, { params }),
+  getChartData: (params?: { pairIds?: string[]; days?: number }) =>
+    api.get<{ results: LLMTestResult[]; pairs: { id: string; name: string; testModelName: string }[] }>(
+      '/llm-test/results/chart',
+      { params: { ...params, pairIds: params?.pairIds?.join(',') } }
+    ),
+
+  // 통계
+  getStats: () =>
+    api.get<{
+      totalPairs: number;
+      enabledPairs: number;
+      recentTestCount: number;
+      successRate: number;
+      avgLatency: number;
+      avgScore: number | null;
+    }>('/llm-test/stats'),
+};
+
 // 휴일 관리 API
 export interface Holiday {
   id: string;
