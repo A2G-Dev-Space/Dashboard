@@ -74,7 +74,60 @@ function buildChatCompletionUrl(endpointUrl: string): string {
 const MAX_RETRIES = 3;
 
 /**
+ * 텍스트에서 JSON 추출 (reasoning 태그 등 제거)
+ * <think>...</think> 같은 태그가 있어도 JSON을 찾아서 파싱
+ */
+function extractJSON<T>(content: string): T {
+  // 1. 먼저 전체 내용이 JSON인지 시도
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    // 계속 진행
+  }
+
+  // 2. <think>...</think> 등의 태그 제거 후 시도
+  const withoutTags = content
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+    .trim();
+
+  try {
+    return JSON.parse(withoutTags) as T;
+  } catch {
+    // 계속 진행
+  }
+
+  // 3. JSON 객체 패턴 찾기 (가장 바깥쪽 { } 찾기)
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]) as T;
+    } catch {
+      // 계속 진행
+    }
+  }
+
+  // 4. 마지막 시도: 줄바꿈으로 분리된 JSON 찾기
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        return JSON.parse(trimmed) as T;
+      } catch {
+        // 계속 진행
+      }
+    }
+  }
+
+  throw new Error(`No valid JSON found in response`);
+}
+
+/**
  * LLM에 JSON 형식 요청 보내기 (structured output)
+ * - OpenAI 호환 API: response_format 사용
+ * - 비호환 API: 프롬프트만으로 JSON 유도 + extractJSON으로 파싱
  */
 async function sendLLMRequestJSON<T>(
   endpoint: string,
@@ -90,6 +143,7 @@ async function sendLLMRequestJSON<T>(
   }
 
   let lastError: Error | null = null;
+  let useStructuredOutput = true; // 첫 시도는 structured output 사용
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const startTime = Date.now();
@@ -101,9 +155,9 @@ async function sendLLMRequestJSON<T>(
         temperature: 0.7,
       };
 
-      // JSON 모드 설정 (OpenAI 호환)
-      if (jsonSchema) {
-        // OpenAI의 structured output (response_format with json_schema)
+      // 첫 번째 시도: structured output 사용
+      // 실패하면 두 번째부터는 structured output 없이 시도
+      if (useStructuredOutput && jsonSchema) {
         requestBody.response_format = {
           type: 'json_schema',
           json_schema: {
@@ -112,9 +166,6 @@ async function sendLLMRequestJSON<T>(
             schema: jsonSchema.schema,
           },
         };
-      } else {
-        // 기본 JSON 모드
-        requestBody.response_format = { type: 'json_object' };
       }
 
       const response = await fetchWithTimeout(url, {
@@ -127,6 +178,10 @@ async function sendLLMRequestJSON<T>(
 
       if (!response.ok) {
         const errorText = await response.text();
+        // structured output 지원 안하면 다음 시도에서 제외
+        if (response.status === 400 && errorText.includes('response_format')) {
+          useStructuredOutput = false;
+        }
         throw new Error(`LLM request failed (${response.status}): ${errorText.slice(0, 200)}`);
       }
 
@@ -135,19 +190,20 @@ async function sendLLMRequestJSON<T>(
       };
       const content = responseData.choices?.[0]?.message?.content || '';
 
-      // JSON 파싱
-      try {
-        const parsed = JSON.parse(content) as T;
-        return { data: parsed, latencyMs };
-      } catch (parseError) {
-        throw new Error(`JSON parse failed: ${content.slice(0, 200)}`);
-      }
+      // JSON 추출 (태그 등 제거)
+      const parsed = extractJSON<T>(content);
+      return { data: parsed, latencyMs };
+
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Unknown error');
       console.warn(`[LLMTest] Attempt ${attempt}/${MAX_RETRIES} failed: ${lastError.message}`);
 
+      // JSON 파싱 실패 시 다음 시도에서 structured output 제외
+      if (lastError.message.includes('No valid JSON') || lastError.message.includes('JSON parse')) {
+        useStructuredOutput = false;
+      }
+
       if (attempt < MAX_RETRIES) {
-        // 재시도 전 잠시 대기
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
     }
