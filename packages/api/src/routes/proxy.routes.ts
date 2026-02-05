@@ -20,6 +20,7 @@ interface EndpointInfo {
   endpointUrl: string;
   apiKey: string | null;
   modelName: string;  // 엔드포인트별 모델명
+  extraHeaders: Record<string, string> | null;  // LLM 호출 시 추가 헤더
 }
 
 /**
@@ -30,7 +31,7 @@ async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo):
   const subModels = await prisma.subModel.findMany({
     where: { parentId: modelId, enabled: true },
     orderBy: { sortOrder: 'asc' },
-    select: { endpointUrl: true, apiKey: true, modelName: true },
+    select: { endpointUrl: true, apiKey: true, modelName: true, extraHeaders: true },
   });
 
   if (subModels.length === 0) {
@@ -45,18 +46,19 @@ async function getModelEndpoints(modelId: string, parentEndpoint: EndpointInfo):
       endpointUrl: s.endpointUrl,
       apiKey: s.apiKey,
       modelName: s.modelName || parentEndpoint.modelName,
+      extraHeaders: s.extraHeaders as Record<string, string> | null,
     })),
   ];
 }
 
 /**
- * 라운드로빈으로 다음 엔드포인트 선택
+ * 라운드로빈 시작 인덱스 반환
  * Redis에 인덱스 저장하여 서버 재시작에도 유지
- * Redis 실패 시 첫 번째 엔드포인트(parent) 사용
+ * Redis 실패 시 0 (parent) 반환
  */
-async function selectEndpointRoundRobin(modelId: string, endpoints: EndpointInfo[]): Promise<EndpointInfo> {
-  if (endpoints.length === 1) {
-    return endpoints[0]!;
+async function getRoundRobinIndex(modelId: string, endpointCount: number): Promise<number> {
+  if (endpointCount <= 1) {
+    return 0;
   }
 
   try {
@@ -67,12 +69,11 @@ async function selectEndpointRoundRobin(modelId: string, endpoints: EndpointInfo
       await redis.expire(key, 7 * 24 * 60 * 60);
     }
 
-    const selectedIndex = (index - 1) % endpoints.length;
-    return endpoints[selectedIndex]!;
+    return (index - 1) % endpointCount;
   } catch (error) {
-    // Redis 실패 시 첫 번째 엔드포인트(parent) 사용
+    // Redis 실패 시 parent(0) 사용
     console.error('[RoundRobin] Redis error, falling back to parent endpoint:', error);
-    return endpoints[0]!;
+    return 0;
   }
 }
 
@@ -411,43 +412,82 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     // Get or create user for usage tracking
     const user = await getOrCreateUser(req);
 
-    // 라운드로빈: parent + subModels에서 엔드포인트 선택
-    const endpoints = await getModelEndpoints(model.id, { endpointUrl: model.endpointUrl, apiKey: model.apiKey, modelName: model.name });
-    const selectedEndpoint = await selectEndpointRoundRobin(model.id, endpoints);
+    // 라운드로빈 + Failover: parent + subModels에서 엔드포인트 선택
+    const endpoints = await getModelEndpoints(model.id, {
+      endpointUrl: model.endpointUrl,
+      apiKey: model.apiKey,
+      modelName: model.name,
+      extraHeaders: model.extraHeaders as Record<string, string> | null,
+    });
+    const startIdx = await getRoundRobinIndex(model.id, endpoints.length);
 
     if (endpoints.length > 1) {
-      console.log(`[RoundRobin] Model "${model.name}" has ${endpoints.length} endpoints, selected: ${selectedEndpoint.endpointUrl}`);
+      console.log(`[RoundRobin] Model "${model.name}" has ${endpoints.length} endpoints, starting at index ${startIdx}`);
     }
 
-    // Prepare request to actual LLM (선택된 엔드포인트의 modelName 사용)
-    const llmRequestBody = {
-      model: selectedEndpoint.modelName,
-      messages,
-      stream: stream || false,
-      ...otherParams,
-    };
+    // Failover loop: 각 엔드포인트를 한 번씩 시도
+    let lastFailoverError: string | undefined;
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    for (let attempt = 0; attempt < endpoints.length; attempt++) {
+      const idx = (startIdx + attempt) % endpoints.length;
+      const endpoint = endpoints[idx]!;
 
-    if (selectedEndpoint.apiKey) {
-      headers['Authorization'] = `Bearer ${selectedEndpoint.apiKey}`;
+      if (attempt > 0) {
+        console.log(`[Failover] Model "${model.name}" trying endpoint ${attempt + 1}/${endpoints.length}: ${endpoint.endpointUrl}`);
+      }
+
+      // 이 엔드포인트용 헤더 + 바디 구성
+      const llmRequestBody = {
+        model: endpoint.modelName,
+        messages,
+        stream: stream || false,
+        ...otherParams,
+      };
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (endpoint.apiKey) {
+        headers['Authorization'] = `Bearer ${endpoint.apiKey}`;
+      }
+
+      if (endpoint.extraHeaders) {
+        for (const [key, value] of Object.entries(endpoint.extraHeaders)) {
+          const lowerKey = key.toLowerCase();
+          if (lowerKey !== 'content-type' && lowerKey !== 'authorization') {
+            headers[key] = value;
+          }
+        }
+      }
+
+      const effectiveModel = {
+        ...model,
+        endpointUrl: endpoint.endpointUrl,
+        apiKey: endpoint.apiKey,
+      };
+
+      // 요청 시도: true = 응답 전송 완료 (성공 or 클라이언트 에러), false = failover 필요
+      let handled: boolean;
+      if (stream) {
+        handled = await handleStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
+      } else {
+        handled = await handleNonStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
+      }
+
+      if (handled) return; // 응답 전송 완료 → 끝
+
+      // failover: 다음 엔드포인트 시도
+      lastFailoverError = `Endpoint ${endpoint.endpointUrl} failed`;
     }
 
-    // 실제 요청에 사용할 모델 정보 (선택된 엔드포인트 사용)
-    const effectiveModel = {
-      ...model,
-      endpointUrl: selectedEndpoint.endpointUrl,
-      apiKey: selectedEndpoint.apiKey,
-    };
-
-    // Handle streaming
-    if (stream) {
-      await handleStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
-    } else {
-      await handleNonStreamingRequest(res, effectiveModel, llmRequestBody, headers, user, serviceId);
-    }
+    // 모든 엔드포인트 실패
+    console.error(`[Failover] All ${endpoints.length} endpoints failed for model "${model.name}"`);
+    res.status(503).json({
+      error: 'Service temporarily unavailable',
+      message: `All ${endpoints.length} endpoint(s) failed. Please try again later.`,
+      details: lastFailoverError,
+    });
 
   } catch (error) {
     console.error('Chat completion proxy error:', error);
@@ -456,47 +496,32 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
 });
 
 /**
- * Retry 설정
+ * 요청 설정
  */
-const RETRY_DELAY_MS = 5000; // 5초 대기
-const MAX_RETRIES = 2; // 최대 2회 재시도 (총 3회 시도)
 const REQUEST_TIMEOUT_MS = 120000; // 2분 타임아웃
 
 /**
- * 지연 함수
- */
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * max_tokens 에러인지 확인
+ * max_tokens 관련 에러인지 확인 (두 가지 패턴)
+ * 1. "max_tokens must be at least ..." (너무 작음)
+ * 2. "max_tokens is too large" / "ContextWindowExceededError" (context window 초과)
  */
 function isMaxTokensError(errorText: string): boolean {
   return errorText.includes('max_tokens') && errorText.includes('must be at least');
 }
 
 /**
- * 재시도 가능한 에러인지 확인 (timeout, network error 등)
+ * Context window 초과 에러인지 확인
+ * max_tokens + input_tokens > context_window 일 때 발생
+ * → max_tokens를 제거하고 재시도하면 해결 가능
  */
-function isRetryableError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    const cause = (error as any).cause;
-
-    // Timeout 에러
-    if (message.includes('timeout') || message.includes('timed out')) return true;
-    if (cause?.code === 'UND_ERR_HEADERS_TIMEOUT') return true;
-    if (cause?.code === 'UND_ERR_CONNECT_TIMEOUT') return true;
-    if (cause?.code === 'ETIMEDOUT') return true;
-    if (cause?.code === 'ECONNRESET') return true;
-    if (cause?.code === 'ECONNREFUSED') return true;
-
-    // Network 에러
-    if (message.includes('fetch failed')) return true;
-    if (message.includes('network')) return true;
-  }
-  return false;
+function isContextWindowExceededError(errorText: string): boolean {
+  const lower = errorText.toLowerCase();
+  return (
+    lower.includes('contextwindowexceedederror') ||
+    (lower.includes('max_tokens') && lower.includes('too large')) ||
+    (lower.includes('max_completion_tokens') && lower.includes('too large')) ||
+    (lower.includes('context length') && lower.includes('input tokens'))
+  );
 }
 
 /**
@@ -555,6 +580,7 @@ function logLLMError(
 
 /**
  * Handle non-streaming chat completion
+ * @returns true = 응답 전송 완료 (성공 or 클라이언트 에러), false = 서버/네트워크 에러 (failover 필요)
  */
 async function handleNonStreamingRequest(
   res: Response,
@@ -563,105 +589,121 @@ async function handleNonStreamingRequest(
   headers: Record<string, string>,
   user: { id: string; loginid: string; username: string; deptname: string },
   serviceId: string | null
-) {
+): Promise<boolean> {
   const url = buildChatCompletionsUrl(model.endpointUrl);
-  console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} (non-streaming)`);
+  console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} endpoint=${url} (non-streaming)`);
 
-  let lastError: unknown = null;
+  try {
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      // Latency 측정 시작
-      const startTime = Date.now();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
 
-      // Timeout을 위한 AbortController
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      clearTimeout(timeoutId);
+      const latencyMs = Date.now() - startTime;
 
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        });
+      if (!response.ok) {
+        const errorText = await response.text();
+        logLLMError('Non-Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
 
-        clearTimeout(timeoutId);
+        // Context window 초과 → max_tokens 제거 후 재시도
+        if (response.status === 400 && isContextWindowExceededError(errorText) && (requestBody.max_tokens || requestBody.max_completion_tokens)) {
+          console.log(`[Proxy] Context window exceeded, retrying without max_tokens (was ${requestBody.max_tokens || requestBody.max_completion_tokens})`);
+          const { max_tokens: _mt, max_completion_tokens: _mct, ...bodyWithoutMaxTokens } = requestBody;
+          const retryController = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryController.abort(), REQUEST_TIMEOUT_MS);
+          try {
+            const retryResponse = await fetch(url, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(bodyWithoutMaxTokens),
+              signal: retryController.signal,
+            });
+            clearTimeout(retryTimeoutId);
+            const retryLatencyMs = Date.now() - startTime;
 
-        // Latency 측정 종료
-        const latencyMs = Date.now() - startTime;
+            if (retryResponse.ok) {
+              const data = await retryResponse.json() as {
+                usage?: { prompt_tokens?: number; completion_tokens?: number };
+                [key: string]: unknown;
+              };
+              if (data.usage) {
+                const inputTokens = data.usage.prompt_tokens || 0;
+                const outputTokens = data.usage.completion_tokens || 0;
+                recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, retryLatencyMs).catch((err) => {
+                  console.error('[Usage] Failed to record usage:', err);
+                });
+              }
+              res.json(data);
+              return true;
+            }
+            // 재시도도 실패 → 원래 에러 반환
+            const retryErrorText = await retryResponse.text();
+            res.status(retryResponse.status).json({ error: 'LLM request failed', details: retryErrorText });
+            return true;
+          } catch {
+            clearTimeout(retryTimeoutId);
+            // 재시도 네트워크 에러 → 원래 에러 반환
+          }
+        }
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          logLLMError('Non-Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
-
-          // max_tokens 에러는 재시도하지 않고 명확한 에러 반환
+        // 4xx 클라이언트 에러 → 응답 전송, failover 안 함
+        if (response.status >= 400 && response.status < 500) {
           if (response.status === 400 && isMaxTokensError(errorText)) {
             res.status(400).json({
               error: 'Input too long',
               message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
               details: errorText,
             });
-            return;
+          } else {
+            res.status(response.status).json({ error: 'LLM request failed', details: errorText });
           }
-
-          res.status(response.status).json({ error: 'LLM request failed', details: errorText });
-          return;
+          return true; // 응답 전송 완료
         }
 
-        const data = await response.json() as {
-          usage?: { prompt_tokens?: number; completion_tokens?: number };
-          [key: string]: unknown;
-        };
-
-        // Extract and record usage with latency
-        if (data.usage) {
-          const inputTokens = data.usage.prompt_tokens || 0;
-          const outputTokens = data.usage.completion_tokens || 0;
-
-          // 비동기로 usage 저장 (응답 지연 방지)
-          recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
-            console.error('[Usage] Failed to record usage:', err);
-          });
-        }
-
-        // Return response to client
-        res.json(data);
-        return;
-
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        throw fetchError;
+        // 5xx 서버 에러 → failover 가능
+        console.error(`[Failover] Endpoint ${url} returned ${response.status}, will try next`);
+        return false;
       }
 
-    } catch (error) {
-      lastError = error;
-      console.error(`Non-streaming request error (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`, error);
+      const data = await response.json() as {
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        [key: string]: unknown;
+      };
 
-      // 재시도 가능한 에러인지 확인
-      if (isRetryableError(error) && attempt < MAX_RETRIES) {
-        console.log(`[Proxy] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-        await delay(RETRY_DELAY_MS);
-        continue;
+      if (data.usage) {
+        const inputTokens = data.usage.prompt_tokens || 0;
+        const outputTokens = data.usage.completion_tokens || 0;
+        recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
+          console.error('[Usage] Failed to record usage:', err);
+        });
       }
 
-      // 재시도 불가능하거나 최대 재시도 횟수 초과
-      break;
+      res.json(data);
+      return true; // 성공
+
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
     }
-  }
 
-  // 모든 재시도 실패
-  console.error('Non-streaming request failed after all retries:', lastError);
-  res.status(503).json({
-    error: 'Service temporarily unavailable',
-    message: 'The LLM server is not responding. Please try again later.',
-    details: lastError instanceof Error ? lastError.message : 'Unknown error',
-  });
+  } catch (error) {
+    console.error(`[Failover] Endpoint ${url} connection failed:`, error instanceof Error ? error.message : error);
+    return false; // 네트워크/타임아웃 에러 → failover
+  }
 }
 
 /**
  * Handle streaming chat completion
- * Streaming에서는 마지막 chunk에 usage 정보가 포함될 수 있음
+ * @returns true = 응답 전송 완료 (성공 or 클라이언트 에러), false = 서버/네트워크 에러 (failover 필요)
+ * 주의: SSE 헤더가 이미 전송된 후에는 failover 불가 → 항상 true 반환
  */
 async function handleStreamingRequest(
   res: Response,
@@ -670,52 +712,59 @@ async function handleStreamingRequest(
   headers: Record<string, string>,
   user: { id: string; loginid: string; username: string; deptname: string },
   serviceId: string | null
-) {
+): Promise<boolean> {
   const url = buildChatCompletionsUrl(model.endpointUrl);
-  console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} (streaming)`);
+  console.log(`[Proxy] user=${user.loginid} (${user.username}, ${user.deptname}) model=${model.name} endpoint=${url} (streaming)`);
 
-  let lastError: unknown = null;
+  const startTime = Date.now();
+  let sseStarted = false;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    // Latency 측정 시작 (전체 스트리밍 완료까지)
-    const startTime = Date.now();
+  try {
+    let contextWindowRetried = false;
+    const requestWithUsage = {
+      ...requestBody,
+      stream_options: { include_usage: true },
+    };
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: globalThis.Response;
 
     try {
-      // stream_options를 추가하여 usage 정보 요청 (OpenAI compatible)
-      const requestWithUsage = {
-        ...requestBody,
-        stream_options: { include_usage: true },
-      };
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestWithUsage),
+        signal: controller.signal,
+      });
 
-      // Timeout을 위한 AbortController
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      // stream_options 지원 안 하는 LLM → 원본 요청으로 재시도
+      if (!response.ok && response.status === 400) {
+        const errorText = await response.text();
 
-      let response: globalThis.Response;
+        if (isMaxTokensError(errorText)) {
+          clearTimeout(timeoutId);
+          res.status(400).json({
+            error: 'Input too long',
+            message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
+            details: errorText,
+          });
+          return true;
+        }
 
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(requestWithUsage),
-          signal: controller.signal,
-        });
-
-        // stream_options 지원 안 하는 LLM의 경우 원본 요청으로 재시도
-        if (!response.ok && response.status === 400) {
-          const errorText = await response.text();
-
-          // max_tokens 에러는 재시도하지 않고 명확한 에러 반환
-          if (isMaxTokensError(errorText)) {
-            clearTimeout(timeoutId);
-            res.status(400).json({
-              error: 'Input too long',
-              message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
-              details: errorText,
-            });
-            return;
-          }
-
+        // Context window 초과 → max_tokens 제거 후 재시도
+        if (isContextWindowExceededError(errorText) && (requestBody.max_tokens || requestBody.max_completion_tokens)) {
+          contextWindowRetried = true;
+          console.log(`[Proxy] Context window exceeded (streaming), retrying without max_tokens (was ${requestBody.max_tokens || requestBody.max_completion_tokens})`);
+          const { max_tokens: _mt, max_completion_tokens: _mct, stream_options: _so, ...bodyWithoutMaxTokens } = requestBody;
+          response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ...bodyWithoutMaxTokens, stream: true }),
+            signal: controller.signal,
+          });
+        } else {
           console.log('[Proxy] Retrying without stream_options');
           response = await fetch(url, {
             method: 'POST',
@@ -724,138 +773,152 @@ async function handleStreamingRequest(
             signal: controller.signal,
           });
         }
-
-        clearTimeout(timeoutId);
-
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        throw fetchError;
       }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        logLLMError('Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
+      clearTimeout(timeoutId);
 
-        // max_tokens 에러는 재시도하지 않고 명확한 에러 반환
-        if (response.status === 400 && isMaxTokensError(errorText)) {
-          res.status(400).json({
-            error: 'Input too long',
-            message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
-            details: errorText,
-          });
-          return;
-        }
-
-        res.status(response.status).json({ error: 'LLM request failed', details: errorText });
-        return;
-      }
-
-      // Set SSE headers
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-
-      const reader = response.body?.getReader();
-      if (!reader) {
-        res.status(500).json({ error: 'Failed to get response stream' });
-        return;
-      }
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let usageData: { prompt_tokens?: number; completion_tokens?: number } | null = null;
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) {
-            break;
-          }
-
-          const chunk = decoder.decode(value, { stream: true });
-          buffer += chunk;
-
-          // Process complete SSE messages
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6);
-
-              if (dataStr === '[DONE]') {
-                res.write('data: [DONE]\n\n');
-                continue;
-              }
-
-              // Parse to check for usage data
-              try {
-                const parsed = JSON.parse(dataStr);
-                if (parsed.usage) {
-                  usageData = parsed.usage;
-                }
-              } catch {
-                // Not valid JSON, ignore
-              }
-
-              res.write(`data: ${dataStr}\n\n`);
-            } else if (line.trim()) {
-              res.write(`${line}\n`);
-            }
-          }
-        }
-
-        // Flush any remaining buffer
-        if (buffer.trim()) {
-          res.write(`${buffer}\n`);
-        }
-
-      } finally {
-        reader.releaseLock();
-      }
-
-      // Latency 측정 종료
-      const latencyMs = Date.now() - startTime;
-
-      // Record usage if available
-      if (usageData) {
-        const inputTokens = usageData.prompt_tokens || 0;
-        const outputTokens = usageData.completion_tokens || 0;
-
-        recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
-          console.error('[Usage] Failed to record streaming usage:', err);
-        });
-      } else {
-        console.log('[Usage] No usage data in streaming response');
-      }
-
-      res.end();
-      return;
-
-    } catch (error) {
-      lastError = error;
-      console.error(`Streaming request error (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`, error);
-
-      // 재시도 가능한 에러인지 확인
-      if (isRetryableError(error) && attempt < MAX_RETRIES) {
-        console.log(`[Proxy] Retrying in ${RETRY_DELAY_MS / 1000}s...`);
-        await delay(RETRY_DELAY_MS);
-        continue;
-      }
-
-      // 재시도 불가능하거나 최대 재시도 횟수 초과
-      break;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      throw fetchError;
     }
-  }
 
-  // 모든 재시도 실패
-  console.error('Streaming request failed after all retries:', lastError);
-  res.status(503).json({
-    error: 'Service temporarily unavailable',
-    message: 'The LLM server is not responding. Please try again later.',
-    details: lastError instanceof Error ? lastError.message : 'Unknown error',
-  });
+    if (!response.ok) {
+      const errorText = await response.text();
+      logLLMError('Streaming', url, response.status, errorText, requestBody, user, model, serviceId);
+
+      // Context window 초과 → max_tokens 제거 후 재시도 (stream_options 없이 온 경우, 아직 재시도하지 않은 경우만)
+      if (!contextWindowRetried && response.status === 400 && isContextWindowExceededError(errorText) && (requestBody.max_tokens || requestBody.max_completion_tokens)) {
+        console.log(`[Proxy] Context window exceeded (streaming, 2nd check), retrying without max_tokens`);
+        const { max_tokens: _mt, max_completion_tokens: _mct, ...bodyWithoutMaxTokens } = requestBody;
+        try {
+          const retryController = new AbortController();
+          const retryTimeoutId = setTimeout(() => retryController.abort(), REQUEST_TIMEOUT_MS);
+          const retryResponse = await fetch(buildChatCompletionsUrl(model.endpointUrl), {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ...bodyWithoutMaxTokens, stream: true }),
+            signal: retryController.signal,
+          });
+          clearTimeout(retryTimeoutId);
+          if (retryResponse.ok) {
+            // 재시도 성공 → response를 교체하여 아래 스트리밍 로직으로 진행
+            response = retryResponse;
+          } else {
+            const retryErrorText = await retryResponse.text();
+            res.status(retryResponse.status).json({ error: 'LLM request failed', details: retryErrorText });
+            return true;
+          }
+        } catch {
+          // 재시도 실패 → 원래 에러 반환
+          res.status(response.status).json({ error: 'LLM request failed', details: errorText });
+          return true;
+        }
+      } else {
+        // 4xx 클라이언트 에러 → 응답 전송, failover 안 함
+        if (response.status >= 400 && response.status < 500) {
+          if (response.status === 400 && isMaxTokensError(errorText)) {
+            res.status(400).json({
+              error: 'Input too long',
+              message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
+              details: errorText,
+            });
+          } else {
+            res.status(response.status).json({ error: 'LLM request failed', details: errorText });
+          }
+          return true;
+        }
+
+        // 5xx 서버 에러 → failover 가능
+        console.error(`[Failover] Endpoint ${url} returned ${response.status}, will try next`);
+        return false;
+      }
+    }
+
+    // === SSE 스트리밍 시작 (이 이후로는 failover 불가) ===
+    sseStarted = true;
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      res.status(500).json({ error: 'Failed to get response stream' });
+      return true;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let usageData: { prompt_tokens?: number; completion_tokens?: number } | null = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6);
+
+            if (dataStr === '[DONE]') {
+              res.write('data: [DONE]\n\n');
+              continue;
+            }
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.usage) {
+                usageData = parsed.usage;
+              }
+            } catch {
+              // Not valid JSON, ignore
+            }
+
+            res.write(`data: ${dataStr}\n\n`);
+          } else if (line.trim()) {
+            res.write(`${line}\n`);
+          }
+        }
+      }
+
+      if (buffer.trim()) {
+        res.write(`${buffer}\n`);
+      }
+
+    } finally {
+      reader.releaseLock();
+    }
+
+    const latencyMs = Date.now() - startTime;
+
+    if (usageData) {
+      const inputTokens = usageData.prompt_tokens || 0;
+      const outputTokens = usageData.completion_tokens || 0;
+      recordUsage(user.id, user.loginid, model.id, inputTokens, outputTokens, serviceId, latencyMs).catch((err) => {
+        console.error('[Usage] Failed to record streaming usage:', err);
+      });
+    } else {
+      console.log('[Usage] No usage data in streaming response');
+    }
+
+    res.end();
+    return true; // 스트리밍 완료
+
+  } catch (error) {
+    if (sseStarted) {
+      // SSE 이미 시작됐으면 failover 불가 → 응답 종료
+      console.error(`[Streaming] Error after SSE started, ending response:`, error instanceof Error ? error.message : error);
+      try { res.end(); } catch {}
+      return true;
+    }
+    console.error(`[Failover] Endpoint ${url} connection failed:`, error instanceof Error ? error.message : error);
+    return false; // 연결 실패 → failover 가능
+  }
 }
 
 /**

@@ -92,6 +92,9 @@ model Model {
   // 사업부 제한 (빈 배열 = 제한 없음, 모든 사업부 허용)
   allowedBusinessUnits String[] @default([]) @map("allowed_business_units")
 
+  // LLM 호출 시 추가 헤더 (JSON object, e.g. {"X-Custom": "value"})
+  extraHeaders Json?   @map("extra_headers")
+
   // 서비스 연결 (nullable for migration, then required)
   serviceId   String?  @map("service_id")
   service     Service? @relation(fields: [serviceId], references: [id])
@@ -115,6 +118,7 @@ model SubModel {
   modelName   String?  @map("model_name")  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl String   @map("endpoint_url")
   apiKey      String?  @map("api_key")
+  extraHeaders Json?   @map("extra_headers")  // LLM 호출 시 추가 헤더
   enabled     Boolean  @default(true)
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")

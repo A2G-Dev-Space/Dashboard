@@ -70,6 +70,9 @@ export const modelsApi = {
     api.put(`/admin/models/${modelId}/sub-models/${subModelId}`, data),
   deleteSubModel: (modelId: string, subModelId: string) =>
     api.delete(`/admin/models/${modelId}/sub-models/${subModelId}`),
+  // 엔드포인트 테스트 (call test + tool call test)
+  testEndpoint: (data: { endpointUrl: string; modelName: string; apiKey?: string; extraHeaders?: Record<string, string> }) =>
+    api.post('/admin/models/test', data),
 };
 
 export const usersApi = {
@@ -179,6 +182,7 @@ interface CreateModelData {
   displayName: string;
   endpointUrl: string;
   apiKey?: string;
+  extraHeaders?: Record<string, string>;
   maxTokens?: number;
   enabled?: boolean;
   serviceId?: string;
@@ -189,6 +193,7 @@ interface CreateSubModelData {
   modelName?: string;  // 엔드포인트별 모델명 (생략 시 parent.name 사용)
   endpointUrl: string;
   apiKey?: string;
+  extraHeaders?: Record<string, string>;
   enabled?: boolean;
   sortOrder?: number;
 }

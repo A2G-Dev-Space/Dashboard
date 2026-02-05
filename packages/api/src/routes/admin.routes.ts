@@ -262,7 +262,8 @@ async function testToolCall(
 async function checkModelEndpointHealth(
   endpointUrl: string,
   modelName: string,
-  apiKey?: string
+  apiKey?: string,
+  extraHeaders?: Record<string, string>
 ): Promise<HealthCheckResult> {
   const totalStart = Date.now();
   const url = buildHealthCheckUrl(endpointUrl);
@@ -270,6 +271,15 @@ async function checkModelEndpointHealth(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  // extraHeaders 병합 (Content-Type, Authorization 덮어쓰기 방지)
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey !== 'content-type' && lowerKey !== 'authorization') {
+        headers[key] = value;
+      }
+    }
   }
 
   // 1단계: Chat Completion 테스트
@@ -308,6 +318,7 @@ const modelSchema = z.object({
   displayName: z.string().min(1).max(200),
   endpointUrl: z.string().url(),
   apiKey: z.string().optional(),
+  extraHeaders: z.record(z.string()).optional(),  // { "X-Custom": "value" }
   maxTokens: z.number().int().min(1).max(1000000).default(128000),
   enabled: z.boolean().default(true),
   serviceId: z.string().uuid().optional(),
@@ -357,7 +368,7 @@ adminRoutes.get('/models', async (req: AuthenticatedRequest, res) => {
         },
         subModels: {
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, modelName: true, endpointUrl: true, apiKey: true, enabled: true, sortOrder: true, createdAt: true },
+          select: { id: true, modelName: true, endpointUrl: true, apiKey: true, extraHeaders: true, enabled: true, sortOrder: true, createdAt: true },
         },
       },
       orderBy: [
@@ -416,7 +427,7 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
     // Health check: 엔드포인트 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey);
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey, validation.data.extraHeaders);
       console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -534,24 +545,32 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    // Health check: endpointUrl 또는 apiKey가 변경된 경우 연결 확인
+    // Health check: endpointUrl, apiKey, name, extraHeaders 중 실제로 변경된 경우만 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
-    if (!skipHealthCheck && (validation.data.endpointUrl || validation.data.apiKey)) {
-      // 변경되지 않은 필드는 기존 값 사용
-      const existing = await prisma.model.findUnique({ where: { id }, select: { endpointUrl: true, apiKey: true, name: true } });
+    if (!skipHealthCheck) {
+      const existing = await prisma.model.findUnique({ where: { id }, select: { endpointUrl: true, apiKey: true, name: true, extraHeaders: true } });
       if (existing) {
-        const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
-        const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
-        const modelName = validation.data.name || existing.name;
-        const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey);
-        console.log(`[HealthCheck] Model "${modelName}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+        const endpointChanged = validation.data.endpointUrl !== undefined && validation.data.endpointUrl !== existing.endpointUrl;
+        const apiKeyChanged = validation.data.apiKey !== undefined && validation.data.apiKey !== (existing.apiKey || undefined);
+        const nameChanged = validation.data.name !== undefined && validation.data.name !== existing.name;
+        const extraHeadersChanged = validation.data.extraHeaders !== undefined &&
+          JSON.stringify(validation.data.extraHeaders) !== JSON.stringify(existing.extraHeaders || undefined);
 
-        if (!healthResult.healthy) {
-          res.status(400).json({
-            error: 'Endpoint health check failed',
-            healthCheck: healthResult,
-          });
-          return;
+        if (endpointChanged || apiKeyChanged || nameChanged || extraHeadersChanged) {
+          const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
+          const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
+          const modelName = validation.data.name || existing.name;
+          const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
+          const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders);
+          console.log(`[HealthCheck] Model "${modelName}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+
+          if (!healthResult.healthy) {
+            res.status(400).json({
+              error: 'Endpoint health check failed',
+              healthCheck: healthResult,
+            });
+            return;
+          }
         }
       }
     }
@@ -630,6 +649,7 @@ const subModelSchema = z.object({
   modelName: z.string().optional(),  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl: z.string().url(),
   apiKey: z.string().optional(),
+  extraHeaders: z.record(z.string()).optional(),  // { "X-Custom": "value" }
   enabled: z.boolean().default(true),
   sortOrder: z.number().int().default(0),
 });
@@ -721,7 +741,7 @@ adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
       const healthCheckModelName = validation.data.modelName || model.name;
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey);
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey, validation.data.extraHeaders);
       console.log(`[HealthCheck] SubModel for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -796,21 +816,30 @@ adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: Authentic
       return;
     }
 
-    // Health check if endpointUrl or apiKey changed (subModel의 modelName이 있으면 그걸 사용)
+    // Health check: 실제로 변경된 필드가 있는 경우만 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
-    if (!skipHealthCheck && (validation.data.endpointUrl || validation.data.apiKey)) {
-      const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
-      const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
-      const healthCheckModelName = validation.data.modelName || existing.modelName || model.name;
-      const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey);
-      console.log(`[HealthCheck] SubModel update for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+    if (!skipHealthCheck) {
+      const endpointChanged = validation.data.endpointUrl !== undefined && validation.data.endpointUrl !== existing.endpointUrl;
+      const apiKeyChanged = validation.data.apiKey !== undefined && validation.data.apiKey !== (existing.apiKey || undefined);
+      const modelNameChanged = validation.data.modelName !== undefined && validation.data.modelName !== (existing.modelName || undefined);
+      const extraHeadersChanged = validation.data.extraHeaders !== undefined &&
+        JSON.stringify(validation.data.extraHeaders) !== JSON.stringify(existing.extraHeaders || undefined);
 
-      if (!healthResult.healthy) {
-        res.status(400).json({
-          error: 'Endpoint health check failed',
-          healthCheck: healthResult,
-        });
-        return;
+      if (endpointChanged || apiKeyChanged || modelNameChanged || extraHeadersChanged) {
+        const endpointUrl = validation.data.endpointUrl || existing.endpointUrl;
+        const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
+        const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
+        const healthCheckModelName = validation.data.modelName || existing.modelName || model.name;
+        const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey, extraHeaders);
+        console.log(`[HealthCheck] SubModel update for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+
+        if (!healthResult.healthy) {
+          res.status(400).json({
+            error: 'Endpoint health check failed',
+            healthCheck: healthResult,
+          });
+          return;
+        }
       }
     }
 
@@ -875,6 +904,37 @@ adminRoutes.delete('/models/:modelId/sub-models/:subModelId', async (req: Authen
   } catch (error) {
     console.error('Delete sub-model error:', error);
     res.status(500).json({ error: 'Failed to delete sub-model' });
+  }
+});
+
+/**
+ * POST /admin/models/test
+ * 모델 엔드포인트 테스트 (저장 전 독립 테스트용)
+ * Body: { endpointUrl, modelName, apiKey?, extraHeaders? }
+ */
+adminRoutes.post('/models/test', async (req: AuthenticatedRequest, res) => {
+  try {
+    const testSchema = z.object({
+      endpointUrl: z.string().url(),
+      modelName: z.string().min(1),
+      apiKey: z.string().optional(),
+      extraHeaders: z.record(z.string()).optional(),
+    });
+
+    const validation = testSchema.safeParse(req.body);
+    if (!validation.success) {
+      res.status(400).json({ error: 'Invalid request', details: validation.error.issues });
+      return;
+    }
+
+    const { endpointUrl, modelName, apiKey, extraHeaders } = validation.data;
+    const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders);
+    console.log(`[Test] Model "${modelName}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
+
+    res.json({ healthCheck: healthResult });
+  } catch (error) {
+    console.error('Model test error:', error);
+    res.status(500).json({ error: 'Failed to test model' });
   }
 });
 

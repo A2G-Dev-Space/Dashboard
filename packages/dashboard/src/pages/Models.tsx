@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
 
 interface SubModel {
@@ -7,6 +7,7 @@ interface SubModel {
   modelName: string | null;  // 엔드포인트별 모델명 (null이면 parent.name 사용)
   endpointUrl: string;
   apiKey: string | null;
+  extraHeaders: Record<string, string> | null;
   enabled: boolean;
   sortOrder: number;
   createdAt: string;
@@ -18,6 +19,7 @@ interface Model {
   displayName: string;
   endpointUrl: string;
   apiKey: string | null;
+  extraHeaders: Record<string, string> | null;
   maxTokens: number;
   enabled: boolean;
   sortOrder: number;
@@ -27,6 +29,16 @@ interface Model {
   service?: { id: string; name: string; displayName: string };
   allowedBusinessUnits?: string[];
   subModels?: SubModel[];
+}
+
+interface HealthCheckResult {
+  healthy: boolean;
+  checks: {
+    chatCompletion: { passed: boolean; status?: number; message: string; latencyMs: number };
+    toolCall: { passed: boolean; status?: number; message: string; latencyMs: number };
+  };
+  message: string;
+  totalLatencyMs: number;
 }
 
 interface ServiceInfo {
@@ -474,6 +486,7 @@ export default function Models({ serviceId }: ModelsProps) {
       {showSubModelModal && editingSubModel && (
         <SubModelModal
           modelId={editingSubModel.modelId}
+          parentModelName={models.find(m => m.id === editingSubModel.modelId)?.name || ''}
           subModel={editingSubModel.subModel}
           onClose={() => {
             setShowSubModelModal(false);
@@ -503,6 +516,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     displayName: model?.displayName || '',
     endpointUrl: model?.endpointUrl || '',
     apiKey: '',
+    extraHeadersJson: model?.extraHeaders && Object.keys(model.extraHeaders).length > 0 ? JSON.stringify(model.extraHeaders, null, 2) : '',
     maxTokens: model?.maxTokens || 128000,
     enabled: model?.enabled ?? true,
     serviceId: model?.serviceId || serviceId || '',
@@ -512,6 +526,9 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
   const [error, setError] = useState('');
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   const [buLoading, setBuLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<HealthCheckResult | null>(null);
+  const [testPassed, setTestPassed] = useState(false);  // 테스트 통과 여부
 
   useEffect(() => {
     modelsApi.businessUnits()
@@ -519,6 +536,60 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
       .catch((err) => console.error('Failed to load business units:', err))
       .finally(() => setBuLoading(false));
   }, []);
+
+  // 편집 모드에서는 테스트 필수 아님 (기존 통과 간주)
+  useEffect(() => {
+    if (model) setTestPassed(true);
+  }, [model]);
+
+  const parseExtraHeaders = (): Record<string, string> | undefined => {
+    if (!formData.extraHeadersJson.trim()) return undefined;
+    try {
+      const parsed = JSON.parse(formData.extraHeadersJson);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+      return parsed;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const handleTest = async () => {
+    if (!formData.endpointUrl || !formData.name) {
+      setError('테스트하려면 Model Name과 Endpoint URL이 필요합니다.');
+      return;
+    }
+    // extraHeaders JSON 유효성 검사
+    if (formData.extraHeadersJson.trim()) {
+      try {
+        const parsed = JSON.parse(formData.extraHeadersJson);
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError('Extra Headers는 JSON 객체 형식이어야 합니다. 예: {"X-Custom": "value"}');
+          return;
+        }
+      } catch {
+        setError('Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+    setTesting(true);
+    setTestResult(null);
+    setError('');
+    try {
+      const res = await modelsApi.testEndpoint({
+        endpointUrl: formData.endpointUrl,
+        modelName: formData.name,
+        apiKey: formData.apiKey || undefined,
+        extraHeaders: parseExtraHeaders(),
+      });
+      setTestResult(res.data.healthCheck);
+      setTestPassed(res.data.healthCheck.healthy);
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { error?: string } } };
+      setError(axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const toggleBusinessUnit = (bu: string) => {
     setFormData((prev) => ({
@@ -531,24 +602,60 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 새 모델 추가 시 테스트 통과 필수
+    if (!testPassed) {
+      setError('모델을 저장하려면 먼저 테스트를 통과해야 합니다. "Test" 버튼을 눌러 테스트해주세요.');
+      return;
+    }
+
+    // extraHeaders JSON 유효성 검사
+    if (formData.extraHeadersJson.trim()) {
+      try {
+        const parsed = JSON.parse(formData.extraHeadersJson);
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError('Extra Headers는 JSON 객체 형식이어야 합니다.');
+          return;
+        }
+      } catch {
+        setError('Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+
     setLoading(true);
     setError('');
 
     try {
+      const { extraHeadersJson, ...rest } = formData;
+      // 편집 모드에서 textarea 비움 + 기존에 extraHeaders 있었으면 → {} 전송해서 삭제
+      const extraHeaders = formData.extraHeadersJson.trim()
+        ? parseExtraHeaders()
+        : (model?.extraHeaders && Object.keys(model.extraHeaders).length > 0 ? {} : undefined);
       const data = {
-        ...formData,
+        ...rest,
         apiKey: formData.apiKey || undefined,
         serviceId: formData.serviceId || undefined,
+        extraHeaders,
       };
 
       if (model) {
         await modelsApi.update(model.id, data);
       } else {
+        // 새 모델: 서버에서도 health check 수행
         await modelsApi.create(data);
       }
       onSave();
-    } catch (err) {
-      setError('Failed to save model. Please check your inputs.');
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { error?: string; healthCheck?: HealthCheckResult } } };
+      const healthCheck = axiosError.response?.data?.healthCheck;
+      if (healthCheck) {
+        setTestResult(healthCheck);
+        setTestPassed(false);
+        setError(`Endpoint health check 실패: ${healthCheck.message}`);
+      } else {
+        setError(axiosError.response?.data?.error || 'Failed to save model. Please check your inputs.');
+      }
       console.error('Save model error:', err);
     } finally {
       setLoading(false);
@@ -572,7 +679,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
             <input
               type="text"
               value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, name: e.target.value }); setTestPassed(!!model); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="e.g., gpt-4"
               required
@@ -600,7 +707,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
             <input
               type="url"
               value={formData.endpointUrl}
-              onChange={(e) => setFormData({ ...formData, endpointUrl: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, endpointUrl: e.target.value }); setTestPassed(!!model); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="https://api.openai.com/v1/chat/completions"
               required
@@ -614,10 +721,78 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
             <input
               type="password"
               value={formData.apiKey}
-              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, apiKey: e.target.value }); setTestPassed(!!model); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="sk-..."
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Extra Headers <span className="text-gray-400 font-normal">(JSON)</span>
+            </label>
+            <textarea
+              value={formData.extraHeadersJson}
+              onChange={(e) => {
+                setFormData({ ...formData, extraHeadersJson: e.target.value });
+                setTestPassed(!!model); // 변경 시 재테스트 필요 (편집모드에서만 유지)
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent font-mono text-sm"
+              placeholder={'{\n  "X-Custom-Header": "value"\n}'}
+              rows={3}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              LLM API 호출 시 추가할 헤더를 JSON 형식으로 입력하세요.
+            </p>
+          </div>
+
+          {/* Test 버튼 및 결과 */}
+          <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">
+                Endpoint Test {!model && <span className="text-red-500">*</span>}
+              </label>
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing || !formData.endpointUrl || !formData.name}
+                className="flex items-center gap-2 px-3 py-1.5 bg-samsung-blue text-white text-sm rounded-lg hover:bg-samsung-blue-dark disabled:opacity-50 transition-colors"
+              >
+                {testing ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Testing...</>
+                ) : (
+                  <><Play className="w-4 h-4" /> Test</>
+                )}
+              </button>
+            </div>
+            {!model && !testPassed && (
+              <p className="text-xs text-amber-600">
+                새 모델 추가 시 Call Test와 Tool Call Test를 통과해야 저장할 수 있습니다.
+              </p>
+            )}
+            {testResult && (
+              <div className="space-y-2">
+                <div className={`flex items-center gap-2 text-sm ${testResult.checks.chatCompletion.passed ? 'text-green-600' : 'text-red-600'}`}>
+                  {testResult.checks.chatCompletion.passed ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span className="font-medium">Call Test</span>
+                  <span className="text-gray-400">({testResult.checks.chatCompletion.latencyMs}ms)</span>
+                  <span className="text-xs truncate max-w-[200px]" title={testResult.checks.chatCompletion.message}>
+                    {testResult.checks.chatCompletion.message}
+                  </span>
+                </div>
+                <div className={`flex items-center gap-2 text-sm ${testResult.checks.toolCall.passed ? 'text-green-600' : 'text-red-600'}`}>
+                  {testResult.checks.toolCall.passed ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span className="font-medium">Tool Call Test</span>
+                  <span className="text-gray-400">({testResult.checks.toolCall.latencyMs}ms)</span>
+                  <span className="text-xs truncate max-w-[200px]" title={testResult.checks.toolCall.message}>
+                    {testResult.checks.toolCall.message}
+                  </span>
+                </div>
+                <div className={`text-xs font-medium ${testResult.healthy ? 'text-green-600' : 'text-red-600'}`}>
+                  Total: {testResult.totalLatencyMs}ms — {testResult.healthy ? 'All checks passed' : testResult.message}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -737,32 +912,110 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
 
 interface SubModelModalProps {
   modelId: string;
+  parentModelName: string;
   subModel: SubModel | null;
   onClose: () => void;
   onSave: () => void;
 }
 
-function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProps) {
+function SubModelModal({ modelId, parentModelName, subModel, onClose, onSave }: SubModelModalProps) {
   const [formData, setFormData] = useState({
     modelName: subModel?.modelName || '',
     endpointUrl: subModel?.endpointUrl || '',
     apiKey: '',
+    extraHeadersJson: subModel?.extraHeaders && Object.keys(subModel.extraHeaders).length > 0 ? JSON.stringify(subModel.extraHeaders, null, 2) : '',
     enabled: subModel?.enabled ?? true,
     sortOrder: subModel?.sortOrder || 0,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<HealthCheckResult | null>(null);
+  const [testPassed, setTestPassed] = useState(!!subModel);  // 편집 시 기존 통과 간주
+
+  const parseExtraHeaders = (): Record<string, string> | undefined => {
+    if (!formData.extraHeadersJson.trim()) return undefined;
+    try {
+      const parsed = JSON.parse(formData.extraHeadersJson);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+      return parsed;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const handleTest = async () => {
+    if (!formData.endpointUrl) {
+      setError('테스트하려면 Endpoint URL이 필요합니다.');
+      return;
+    }
+    if (formData.extraHeadersJson.trim()) {
+      try {
+        const parsed = JSON.parse(formData.extraHeadersJson);
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError('Extra Headers는 JSON 객체 형식이어야 합니다.');
+          return;
+        }
+      } catch {
+        setError('Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+    setTesting(true);
+    setTestResult(null);
+    setError('');
+    try {
+      const res = await modelsApi.testEndpoint({
+        endpointUrl: formData.endpointUrl,
+        modelName: formData.modelName || parentModelName,
+        apiKey: formData.apiKey || undefined,
+        extraHeaders: parseExtraHeaders(),
+      });
+      setTestResult(res.data.healthCheck);
+      setTestPassed(res.data.healthCheck.healthy);
+    } catch (err: unknown) {
+      const axiosError = err as { response?: { data?: { error?: string } } };
+      setError(axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!testPassed) {
+      setError('서브모델을 저장하려면 먼저 테스트를 통과해야 합니다.');
+      return;
+    }
+
+    if (formData.extraHeadersJson.trim()) {
+      try {
+        const parsed = JSON.parse(formData.extraHeadersJson);
+        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+          setError('Extra Headers는 JSON 객체 형식이어야 합니다.');
+          return;
+        }
+      } catch {
+        setError('Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+
     setLoading(true);
     setError('');
 
     try {
+      const { extraHeadersJson, ...rest } = formData;
+      // 편집 모드에서 textarea 비움 + 기존에 extraHeaders 있었으면 → {} 전송해서 삭제
+      const extraHeaders = formData.extraHeadersJson.trim()
+        ? parseExtraHeaders()
+        : (subModel?.extraHeaders && Object.keys(subModel.extraHeaders).length > 0 ? {} : undefined);
       const data = {
-        ...formData,
+        ...rest,
         modelName: formData.modelName || undefined,
         apiKey: formData.apiKey || undefined,
+        extraHeaders,
       };
 
       if (subModel) {
@@ -772,10 +1025,15 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
       }
       onSave();
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { error?: string; healthCheck?: { message?: string } } } };
-      const healthCheckMsg = axiosError.response?.data?.healthCheck?.message;
-      const errorMsg = axiosError.response?.data?.error;
-      setError(healthCheckMsg || errorMsg || '서브모델 저장에 실패했습니다.');
+      const axiosError = err as { response?: { data?: { error?: string; healthCheck?: HealthCheckResult } } };
+      const healthCheck = axiosError.response?.data?.healthCheck;
+      if (healthCheck) {
+        setTestResult(healthCheck);
+        setTestPassed(false);
+        setError(`Health check 실패: ${healthCheck.message}`);
+      } else {
+        setError(axiosError.response?.data?.error || '서브모델 저장에 실패했습니다.');
+      }
       console.error('Save sub-model error:', err);
     } finally {
       setLoading(false);
@@ -802,7 +1060,7 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
             <input
               type="text"
               value={formData.modelName}
-              onChange={(e) => setFormData({ ...formData, modelName: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, modelName: e.target.value }); setTestPassed(!!subModel); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="비워두면 Parent 모델명 사용"
             />
@@ -816,7 +1074,7 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
             <input
               type="url"
               value={formData.endpointUrl}
-              onChange={(e) => setFormData({ ...formData, endpointUrl: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, endpointUrl: e.target.value }); setTestPassed(!!subModel); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="https://api.example.com/v1/chat/completions"
               required
@@ -830,10 +1088,69 @@ function SubModelModal({ modelId, subModel, onClose, onSave }: SubModelModalProp
             <input
               type="password"
               value={formData.apiKey}
-              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+              onChange={(e) => { setFormData({ ...formData, apiKey: e.target.value }); setTestPassed(!!subModel); setTestResult(null); }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
               placeholder="sk-..."
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Extra Headers <span className="text-gray-400 font-normal">(JSON)</span>
+            </label>
+            <textarea
+              value={formData.extraHeadersJson}
+              onChange={(e) => { setFormData({ ...formData, extraHeadersJson: e.target.value }); setTestPassed(!!subModel); setTestResult(null); }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent font-mono text-sm"
+              placeholder={'{\n  "X-Custom-Header": "value"\n}'}
+              rows={3}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              LLM API 호출 시 추가할 헤더를 JSON 형식으로 입력하세요.
+            </p>
+          </div>
+
+          {/* Test 버튼 및 결과 */}
+          <div className="border border-gray-200 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">
+                Endpoint Test {!subModel && <span className="text-red-500">*</span>}
+              </label>
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing || !formData.endpointUrl}
+                className="flex items-center gap-2 px-3 py-1.5 bg-samsung-blue text-white text-sm rounded-lg hover:bg-samsung-blue-dark disabled:opacity-50 transition-colors"
+              >
+                {testing ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Testing...</>
+                ) : (
+                  <><Play className="w-4 h-4" /> Test</>
+                )}
+              </button>
+            </div>
+            {!subModel && !testPassed && (
+              <p className="text-xs text-amber-600">
+                서브모델 추가 시 Call Test와 Tool Call Test를 통과해야 저장할 수 있습니다.
+              </p>
+            )}
+            {testResult && (
+              <div className="space-y-2">
+                <div className={`flex items-center gap-2 text-sm ${testResult.checks.chatCompletion.passed ? 'text-green-600' : 'text-red-600'}`}>
+                  {testResult.checks.chatCompletion.passed ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span className="font-medium">Call Test</span>
+                  <span className="text-gray-400">({testResult.checks.chatCompletion.latencyMs}ms)</span>
+                </div>
+                <div className={`flex items-center gap-2 text-sm ${testResult.checks.toolCall.passed ? 'text-green-600' : 'text-red-600'}`}>
+                  {testResult.checks.toolCall.passed ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span className="font-medium">Tool Call Test</span>
+                  <span className="text-gray-400">({testResult.checks.toolCall.latencyMs}ms)</span>
+                </div>
+                <div className={`text-xs font-medium ${testResult.healthy ? 'text-green-600' : 'text-red-600'}`}>
+                  Total: {testResult.totalLatencyMs}ms — {testResult.healthy ? 'All checks passed' : testResult.message}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
