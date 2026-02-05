@@ -584,8 +584,10 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { error?: string } } };
-      setError(axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
+      const axiosError = err as { response?: { data?: { error?: string; details?: Array<{ path?: string[]; message?: string }> } } };
+      const details = axiosError.response?.data?.details;
+      const detailMsg = details?.map((d) => `${d.path?.join('.') || '?'}: ${d.message}`).join(', ');
+      setError(detailMsg || axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
     } finally {
       setTesting(false);
     }
@@ -974,8 +976,10 @@ function SubModelModal({ modelId, parentModelName, subModel, onClose, onSave }: 
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);
     } catch (err: unknown) {
-      const axiosError = err as { response?: { data?: { error?: string } } };
-      setError(axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
+      const axiosError = err as { response?: { data?: { error?: string; details?: Array<{ path?: string[]; message?: string }> } } };
+      const details = axiosError.response?.data?.details;
+      const detailMsg = details?.map((d) => `${d.path?.join('.') || '?'}: ${d.message}`).join(', ');
+      setError(detailMsg || axiosError.response?.data?.error || '테스트 요청에 실패했습니다.');
     } finally {
       setTesting(false);
     }
