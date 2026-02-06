@@ -80,12 +80,21 @@ async function sendLLMRequestJSON<T>(
   modelName: string,
   apiKey: string | null,
   messages: { role: string; content: string }[],
-  jsonSchema?: { name: string; schema: object }
+  jsonSchema?: { name: string; schema: object },
+  extraHeaders?: Record<string, string> | null
 ): Promise<{ data: T; latencyMs: number }> {
   const url = buildChatCompletionUrl(endpoint);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  if (extraHeaders) {
+    for (const [key, value] of Object.entries(extraHeaders)) {
+      const lowerKey = key.toLowerCase();
+      if (lowerKey !== 'content-type' && lowerKey !== 'authorization') {
+        headers[key] = value;
+      }
+    }
   }
 
   let lastError: Error | null = null;
@@ -205,9 +214,11 @@ export interface TestPairInput {
   questionerModelName: string;
   questionerEndpoint: string;
   questionerApiKey: string | null;
+  questionerExtraHeaders?: Record<string, string> | null;
   testModelName: string;
   testEndpoint: string;
   testApiKey: string | null;
+  testExtraHeaders?: Record<string, string> | null;
   questionPrompt: string;
   evaluationPrompt: string;
 }
@@ -226,6 +237,9 @@ export async function runTest(pair: TestPairInput): Promise<TestResult> {
   try {
     // 1. 질문 생성
     console.log(`[LLMTest] Generating question for pair ${pair.id}...`);
+    const questionerExtra = pair.questionerExtraHeaders as Record<string, string> | null | undefined;
+    const testExtra = pair.testExtraHeaders as Record<string, string> | null | undefined;
+
     const questionResult = await sendLLMRequestJSON<QuestionResponse>(
       pair.questionerEndpoint,
       pair.questionerModelName,
@@ -234,7 +248,8 @@ export async function runTest(pair: TestPairInput): Promise<TestResult> {
         { role: 'system', content: 'You are a question generator. Always respond in JSON format: {"question": "your question here"}' },
         { role: 'user', content: pair.questionPrompt },
       ],
-      QUESTION_SCHEMA
+      QUESTION_SCHEMA,
+      questionerExtra
     );
     const question = questionResult.data.question;
     console.log(`[LLMTest] Question: "${question.slice(0, 100)}..."`);
@@ -249,7 +264,8 @@ export async function runTest(pair: TestPairInput): Promise<TestResult> {
         { role: 'system', content: 'You are a helpful AI assistant. Answer the question accurately and concisely. Always respond in JSON format: {"answer": "your answer", "confidence": "high|medium|low"}' },
         { role: 'user', content: question },
       ],
-      ANSWER_SCHEMA
+      ANSWER_SCHEMA,
+      testExtra
     );
     const testLatencyMs = testResult.latencyMs;
     const answer = testResult.data.answer;
@@ -266,7 +282,8 @@ export async function runTest(pair: TestPairInput): Promise<TestResult> {
         { role: 'system', content: 'You are an AI response evaluator. Always respond in JSON format: {"score": <1-100>, "reasoning": "brief explanation"}' },
         { role: 'user', content: `${pair.evaluationPrompt}\n\nQuestion: ${question}\n\nResponse to evaluate:\n${answer}\n\n(Model's self-reported confidence: ${confidence})` },
       ],
-      EVALUATION_SCHEMA
+      EVALUATION_SCHEMA,
+      questionerExtra
     );
 
     const score = Math.min(100, Math.max(1, Math.round(evalResult.data.score)));
@@ -295,7 +312,7 @@ export async function runTestAndSave(pairId: string): Promise<TestResult> {
   const pair = await prisma.lLMTestPair.findUnique({ where: { id: pairId } });
   if (!pair) throw new Error(`Test pair not found: ${pairId}`);
 
-  const result = await runTest(pair);
+  const result = await runTest(pair as unknown as TestPairInput);
 
   await prisma.lLMTestResult.create({
     data: {
@@ -320,7 +337,7 @@ export async function runTestAndSave(pairId: string): Promise<TestResult> {
 /**
  * 실행이 필요한 테스트 쌍 조회
  */
-async function getTestPairsDue(): Promise<TestPairInput[]> {
+async function getTestPairsDue() {
   const pairs = await prisma.lLMTestPair.findMany({
     where: { enabled: true },
   });

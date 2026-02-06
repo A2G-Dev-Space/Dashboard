@@ -25,9 +25,11 @@ const createTestPairSchema = z.object({
   questionerModelName: z.string().min(1, 'Questioner model name is required'),
   questionerEndpoint: z.string().url('Invalid questioner endpoint URL'),
   questionerApiKey: z.string().optional(),
+  questionerExtraHeaders: z.record(z.string()).optional(),
   testModelName: z.string().min(1, 'Test model name is required'),
   testEndpoint: z.string().url('Invalid test endpoint URL'),
   testApiKey: z.string().optional(),
+  testExtraHeaders: z.record(z.string()).optional(),
   questionPrompt: z.string().optional(),
   evaluationPrompt: z.string().optional(),
 });
@@ -106,9 +108,11 @@ llmTestRoutes.post('/pairs', requireWriteAccess as RequestHandler, async (req, r
       questionerModelName: data.questionerModelName,
       questionerEndpoint: data.questionerEndpoint,
       questionerApiKey: data.questionerApiKey || null,
+      questionerExtraHeaders: data.questionerExtraHeaders || undefined,
       testModelName: data.testModelName,
       testEndpoint: data.testEndpoint,
       testApiKey: data.testApiKey || null,
+      testExtraHeaders: data.testExtraHeaders || undefined,
     };
 
     if (data.questionPrompt !== undefined) createData.questionPrompt = data.questionPrompt;

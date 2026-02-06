@@ -355,11 +355,13 @@ model LLMTestPair {
   questionerModelName String  @map("questioner_model_name")
   questionerEndpoint  String  @map("questioner_endpoint")
   questionerApiKey    String? @map("questioner_api_key")
+  questionerExtraHeaders Json? @map("questioner_extra_headers")
 
   // 테스트 대상 LLM 설정
   testModelName String  @map("test_model_name")
   testEndpoint  String  @map("test_endpoint")
   testApiKey    String? @map("test_api_key")
+  testExtraHeaders       Json? @map("test_extra_headers")
 
   // 질문 생성 프롬프트 (질문자에게 보낼 프롬프트)
   questionPrompt String @default("Generate a short, creative question that tests the AI's knowledge, reasoning, or problem-solving ability. The question should be clear and answerable.") @map("question_prompt")

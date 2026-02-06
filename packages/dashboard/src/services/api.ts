@@ -215,9 +215,11 @@ export interface LLMTestPair {
   questionerModelName: string;
   questionerEndpoint: string;
   questionerApiKey: string | null;
+  questionerExtraHeaders?: Record<string, string> | null;
   testModelName: string;
   testEndpoint: string;
   testApiKey: string | null;
+  testExtraHeaders?: Record<string, string> | null;
   questionPrompt: string;
   evaluationPrompt: string;
   createdAt: string;
@@ -248,9 +250,11 @@ export interface CreateLLMTestPairData {
   questionerModelName: string;
   questionerEndpoint: string;
   questionerApiKey?: string;
+  questionerExtraHeaders?: Record<string, string>;
   testModelName: string;
   testEndpoint: string;
   testApiKey?: string;
+  testExtraHeaders?: Record<string, string>;
   questionPrompt?: string;
   evaluationPrompt?: string;
 }

@@ -189,7 +189,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
     );
   };
 
-  // 차트 데이터 변환 - Scatter plot용
+  // Scatter plot용 (기간 선택 따름)
   const scatterChartData = useMemo(() => {
     return chartData
       .filter(r => r.status === 'SUCCESS' && r.score !== null)
@@ -201,38 +201,26 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
       }));
   }, [chartData]);
 
-  // 시계열 차트 데이터 - 라인차트용 (시간별 평균)
-  const timeSeriesData = useMemo(() => {
+  // Latency 시계열 데이터 - 시간별 평균 (기간 선택 따름, 원래 그대로)
+  const latencyTimeSeriesData = useMemo(() => {
     if (chartData.length === 0) return [];
 
-    // 시간대별로 그룹화 (1시간 단위)
     const grouped: Record<string, Record<string, {
       latencySum: number;
       latencyCount: number;
-      scoreSum: number;
-      scoreCount: number;
     }>> = {};
 
     chartData.forEach(r => {
       if (r.status !== 'SUCCESS') return;
       const date = new Date(r.timestamp);
-      // 1시간 단위로 반올림
       date.setMinutes(0, 0, 0);
       const timeKey = date.toISOString();
 
-      if (!grouped[timeKey]) {
-        grouped[timeKey] = {};
-      }
-      if (!grouped[timeKey][r.pairId]) {
-        grouped[timeKey][r.pairId] = { latencySum: 0, latencyCount: 0, scoreSum: 0, scoreCount: 0 };
-      }
+      if (!grouped[timeKey]) grouped[timeKey] = {};
+      if (!grouped[timeKey][r.pairId]) grouped[timeKey][r.pairId] = { latencySum: 0, latencyCount: 0 };
 
       grouped[timeKey][r.pairId].latencySum += r.latencyMs;
       grouped[timeKey][r.pairId].latencyCount += 1;
-      if (r.score !== null) {
-        grouped[timeKey][r.pairId].scoreSum += r.score;
-        grouped[timeKey][r.pairId].scoreCount += 1;
-      }
     });
 
     return Object.entries(grouped)
@@ -243,12 +231,60 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
           item[`${pairId}_latency`] = data.latencyCount > 0
             ? Math.round(data.latencySum / data.latencyCount)
             : 0;
-          item[`${pairId}_score`] = data.scoreCount > 0
-            ? Math.round(data.scoreSum / data.scoreCount)
-            : 0;
         });
         return item;
       });
+  }, [chartData]);
+
+  // Score 시계열 데이터 - 각 시점 기준 이전 7일 rolling average
+  const scoreTimeSeriesData = useMemo(() => {
+    if (chartData.length === 0) return [];
+
+    // 1) 시간별 raw score를 수집 (pair별)
+    const successData = chartData
+      .filter(r => r.status === 'SUCCESS' && r.score !== null)
+      .map(r => ({
+        timestamp: new Date(r.timestamp).getTime(),
+        pairId: r.pairId,
+        score: r.score!,
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    if (successData.length === 0) return [];
+
+    // 2) 시간별로 그룹화 (1시간 단위)
+    const hourlyByPair: Record<string, Array<{ time: number; score: number }>> = {};
+    successData.forEach(d => {
+      if (!hourlyByPair[d.pairId]) hourlyByPair[d.pairId] = [];
+      const date = new Date(d.timestamp);
+      date.setMinutes(0, 0, 0);
+      hourlyByPair[d.pairId].push({ time: date.getTime(), score: d.score });
+    });
+
+    // 3) 전체 시간 포인트 수집
+    const allTimePoints = new Set<number>();
+    Object.values(hourlyByPair).forEach(arr =>
+      arr.forEach(d => allTimePoints.add(d.time))
+    );
+    const sortedTimes = Array.from(allTimePoints).sort((a, b) => a - b);
+
+    const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+    // 4) 각 시간 포인트에서 이전 7일 rolling average 계산
+    return sortedTimes.map(t => {
+      const item: Record<string, number | string> = { time: new Date(t).toISOString() };
+      const windowStart = t - SEVEN_DAYS_MS;
+
+      Object.entries(hourlyByPair).forEach(([pairId, arr]) => {
+        const inWindow = arr.filter(d => d.time > windowStart && d.time <= t);
+        if (inWindow.length > 0) {
+          const avg = inWindow.reduce((sum, d) => sum + d.score, 0) / inWindow.length;
+          item[`${pairId}_score`] = Math.round(avg * 10) / 10;
+        }
+      });
+
+      return item;
+    });
   }, [chartData]);
 
   const formatTime = (timeStr: string): string => {
@@ -388,7 +424,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
           <div className="h-80 flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-samsung-blue"></div>
           </div>
-        ) : timeSeriesData.length === 0 ? (
+        ) : latencyTimeSeriesData.length === 0 && scoreTimeSeriesData.length === 0 ? (
           <div className="h-80 flex items-center justify-center text-gray-400">
             데이터가 없습니다
           </div>
@@ -399,7 +435,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
               <h3 className="text-sm font-medium text-gray-700 mb-2">Latency (ms)</h3>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <LineChart data={latencyTimeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="time"
@@ -454,10 +490,10 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
 
             {/* Score 차트 */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Score (1-100)</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Score - 7일 Rolling Average (1-100)</h3>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={timeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <LineChart data={scoreTimeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="time"
@@ -515,7 +551,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
         {/* Scatter plot - Latency vs Score */}
         {scatterChartData.length > 0 && (
           <div className="mt-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Latency vs Score 분포</h3>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Latency vs Score 분포 ({days}일)</h3>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
@@ -771,6 +807,16 @@ interface TestPairModalProps {
 
 function TestPairModal({ pair, onClose, onSave }: TestPairModalProps) {
   const [saving, setSaving] = useState(false);
+  const [questionerExtraHeadersJson, setQuestionerExtraHeadersJson] = useState(
+    pair?.questionerExtraHeaders && Object.keys(pair.questionerExtraHeaders).length > 0
+      ? JSON.stringify(pair.questionerExtraHeaders, null, 2)
+      : ''
+  );
+  const [testExtraHeadersJson, setTestExtraHeadersJson] = useState(
+    pair?.testExtraHeaders && Object.keys(pair.testExtraHeaders).length > 0
+      ? JSON.stringify(pair.testExtraHeaders, null, 2)
+      : ''
+  );
   const [formData, setFormData] = useState<CreateLLMTestPairData>({
     name: pair?.name || '',
     enabled: pair?.enabled ?? true,
@@ -785,11 +831,46 @@ function TestPairModal({ pair, onClose, onSave }: TestPairModalProps) {
     evaluationPrompt: pair?.evaluationPrompt || 'Evaluate the AI response based on: accuracy (is it correct?), helpfulness (does it answer the question?), and clarity (is it well-explained?). Score from 1-100.',
   });
 
+  const parseExtraHeaders = (json: string): Record<string, string> | undefined => {
+    if (!json.trim()) return undefined;
+    try {
+      const parsed = JSON.parse(json.trim());
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate extra headers JSON
+    if (questionerExtraHeadersJson.trim()) {
+      const parsed = parseExtraHeaders(questionerExtraHeadersJson);
+      if (!parsed) {
+        alert('질문자 Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+    if (testExtraHeadersJson.trim()) {
+      const parsed = parseExtraHeaders(testExtraHeadersJson);
+      if (!parsed) {
+        alert('테스트 Extra Headers JSON 형식이 올바르지 않습니다.');
+        return;
+      }
+    }
+
+    const questionerExtraHeaders = questionerExtraHeadersJson.trim()
+      ? parseExtraHeaders(questionerExtraHeadersJson)
+      : (pair?.questionerExtraHeaders && Object.keys(pair.questionerExtraHeaders).length > 0 ? {} as Record<string, string> : undefined);
+    const testExtraHeaders = testExtraHeadersJson.trim()
+      ? parseExtraHeaders(testExtraHeadersJson)
+      : (pair?.testExtraHeaders && Object.keys(pair.testExtraHeaders).length > 0 ? {} as Record<string, string> : undefined);
+
     setSaving(true);
     try {
-      await onSave(formData);
+      await onSave({ ...formData, questionerExtraHeaders, testExtraHeaders });
     } finally {
       setSaving(false);
     }
@@ -896,6 +977,18 @@ function TestPairModal({ pair, onClose, onSave }: TestPairModalProps) {
                 required
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Extra Headers (JSON)
+              </label>
+              <textarea
+                value={questionerExtraHeadersJson}
+                onChange={(e) => setQuestionerExtraHeadersJson(e.target.value)}
+                rows={2}
+                placeholder='{"User-Id": "test", "x-dep-ticket": "..."}'
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent font-mono text-sm"
+              />
+            </div>
           </div>
 
           {/* 테스트 LLM */}
@@ -939,6 +1032,18 @@ function TestPairModal({ pair, onClose, onSave }: TestPairModalProps) {
                 placeholder="https://api.anthropic.com/v1"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent"
                 required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Extra Headers (JSON)
+              </label>
+              <textarea
+                value={testExtraHeadersJson}
+                onChange={(e) => setTestExtraHeadersJson(e.target.value)}
+                rows={2}
+                placeholder='{"User-Id": "test", "x-dep-ticket": "..."}'
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-samsung-blue focus:border-transparent font-mono text-sm"
               />
             </div>
           </div>
