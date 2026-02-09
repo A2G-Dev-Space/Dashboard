@@ -23,9 +23,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  ScatterChart,
-  Scatter,
-  ZAxis,
+  Brush,
 } from 'recharts';
 import { llmTestApi, LLMTestPair, LLMTestResult, CreateLLMTestPairData } from '../services/api';
 
@@ -189,19 +187,49 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
     );
   };
 
-  // Scatter plot용 (기간 선택 따름)
-  const scatterChartData = useMemo(() => {
-    return chartData
-      .filter(r => r.status === 'SUCCESS' && r.score !== null)
-      .map(r => ({
-        ...r,
-        timestamp: new Date(r.timestamp).getTime(),
-        pairName: r.pair?.name || 'Unknown',
-        pairId: r.pairId,
-      }));
+  // Scatter plot: pair별 요약 통계 (평균 latency, 평균 score, 범위)
+  const scatterSummaryData = useMemo(() => {
+    const successData = chartData.filter(r => r.status === 'SUCCESS' && r.score !== null);
+    const byPair: Record<string, { latencies: number[]; scores: number[]; name: string }> = {};
+
+    successData.forEach(r => {
+      if (!byPair[r.pairId]) {
+        byPair[r.pairId] = { latencies: [], scores: [], name: r.pair?.name || 'Unknown' };
+      }
+      byPair[r.pairId].latencies.push(r.latencyMs);
+      byPair[r.pairId].scores.push(r.score!);
+    });
+
+    return Object.entries(byPair).map(([pairId, data]) => {
+      const latencies = data.latencies.sort((a, b) => a - b);
+      const scores = data.scores.sort((a, b) => a - b);
+      const p25 = (arr: number[]) => arr[Math.floor(arr.length * 0.25)] || arr[0];
+      const p75 = (arr: number[]) => arr[Math.floor(arr.length * 0.75)] || arr[arr.length - 1];
+      const median = (arr: number[]) => arr[Math.floor(arr.length * 0.5)] || 0;
+      const avg = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / arr.length;
+
+      return {
+        pairId,
+        name: data.name,
+        count: data.latencies.length,
+        avgLatency: Math.round(avg(latencies)),
+        medianLatency: Math.round(median(latencies)),
+        p25Latency: Math.round(p25(latencies)),
+        p75Latency: Math.round(p75(latencies)),
+        minLatency: latencies[0],
+        maxLatency: latencies[latencies.length - 1],
+        avgScore: Math.round(avg(scores) * 10) / 10,
+        medianScore: Math.round(median(scores) * 10) / 10,
+        p25Score: Math.round(p25(scores)),
+        p75Score: Math.round(p75(scores)),
+        minScore: scores[0],
+        maxScore: scores[scores.length - 1],
+      };
+    });
   }, [chartData]);
 
-  // Latency 시계열 데이터 - 시간별 평균 (기간 선택 따름, 원래 그대로)
+  // Latency 시계열 데이터 - 기간에 따라 적응적 집계
+  // 1일=시간별, 3-7일=6시간별, 14일+=일별 평균
   const latencyTimeSeriesData = useMemo(() => {
     if (chartData.length === 0) return [];
 
@@ -213,7 +241,16 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
     chartData.forEach(r => {
       if (r.status !== 'SUCCESS') return;
       const date = new Date(r.timestamp);
-      date.setMinutes(0, 0, 0);
+      if (days <= 1) {
+        // 시간별
+        date.setMinutes(0, 0, 0);
+      } else if (days <= 7) {
+        // 6시간별
+        date.setHours(Math.floor(date.getHours() / 6) * 6, 0, 0, 0);
+      } else {
+        // 일별
+        date.setHours(0, 0, 0, 0);
+      }
       const timeKey = date.toISOString();
 
       if (!grouped[timeKey]) grouped[timeKey] = {};
@@ -234,13 +271,13 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
         });
         return item;
       });
-  }, [chartData]);
+  }, [chartData, days]);
 
-  // Score 시계열 데이터 - 각 시점 기준 이전 7일 rolling average
+  // Score 시계열 데이터 - 기간에 따라 적응적 집계 + 7일 rolling average
   const scoreTimeSeriesData = useMemo(() => {
     if (chartData.length === 0) return [];
 
-    // 1) 시간별 raw score를 수집 (pair별)
+    // 1) raw score 수집 (pair별)
     const successData = chartData
       .filter(r => r.status === 'SUCCESS' && r.score !== null)
       .map(r => ({
@@ -252,18 +289,28 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
 
     if (successData.length === 0) return [];
 
-    // 2) 시간별로 그룹화 (1시간 단위)
-    const hourlyByPair: Record<string, Array<{ time: number; score: number }>> = {};
+    // 2) Latency와 동일한 시간 단위로 그룹화
+    const truncateTime = (date: Date): number => {
+      const d = new Date(date);
+      if (days <= 1) {
+        d.setMinutes(0, 0, 0);
+      } else if (days <= 7) {
+        d.setHours(Math.floor(d.getHours() / 6) * 6, 0, 0, 0);
+      } else {
+        d.setHours(0, 0, 0, 0);
+      }
+      return d.getTime();
+    };
+
+    const groupedByPair: Record<string, Array<{ time: number; score: number }>> = {};
     successData.forEach(d => {
-      if (!hourlyByPair[d.pairId]) hourlyByPair[d.pairId] = [];
-      const date = new Date(d.timestamp);
-      date.setMinutes(0, 0, 0);
-      hourlyByPair[d.pairId].push({ time: date.getTime(), score: d.score });
+      if (!groupedByPair[d.pairId]) groupedByPair[d.pairId] = [];
+      groupedByPair[d.pairId].push({ time: truncateTime(new Date(d.timestamp)), score: d.score });
     });
 
     // 3) 전체 시간 포인트 수집
     const allTimePoints = new Set<number>();
-    Object.values(hourlyByPair).forEach(arr =>
+    Object.values(groupedByPair).forEach(arr =>
       arr.forEach(d => allTimePoints.add(d.time))
     );
     const sortedTimes = Array.from(allTimePoints).sort((a, b) => a - b);
@@ -275,7 +322,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
       const item: Record<string, number | string> = { time: new Date(t).toISOString() };
       const windowStart = t - SEVEN_DAYS_MS;
 
-      Object.entries(hourlyByPair).forEach(([pairId, arr]) => {
+      Object.entries(groupedByPair).forEach(([pairId, arr]) => {
         const inWindow = arr.filter(d => d.time > windowStart && d.time <= t);
         if (inWindow.length > 0) {
           const avg = inWindow.reduce((sum, d) => sum + d.score, 0) / inWindow.length;
@@ -285,15 +332,20 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
 
       return item;
     });
-  }, [chartData]);
+  }, [chartData, days]);
 
   const formatTime = (timeStr: string): string => {
     const date = new Date(timeStr);
     if (days <= 1) {
       return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
     }
-    return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit' });
+    if (days <= 7) {
+      return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit' });
+    }
+    return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
   };
+
+  const aggregationLabel = days <= 1 ? '시간별 평균' : days <= 7 ? '6시간 평균' : '일별 평균';
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -432,8 +484,11 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Latency 차트 */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Latency (ms)</h3>
-              <div className="h-64">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                Latency (ms)
+                <span className="ml-2 text-xs text-gray-400 font-normal">{aggregationLabel}</span>
+              </h3>
+              <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={latencyTimeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -443,6 +498,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
                       tick={{ fill: '#6b7280', fontSize: 10 }}
                       tickLine={false}
                       axisLine={{ stroke: '#e5e7eb' }}
+                      minTickGap={40}
                     />
                     <YAxis
                       tick={{ fill: '#6b7280', fontSize: 10 }}
@@ -483,6 +539,16 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
                         connectNulls
                       />
                     ))}
+                    {latencyTimeSeriesData.length > 48 && (
+                      <Brush
+                        dataKey="time"
+                        height={24}
+                        stroke="#0c8ce6"
+                        fill="#f9fafb"
+                        tickFormatter={formatTime}
+                        startIndex={Math.max(0, latencyTimeSeriesData.length - 48)}
+                      />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -490,8 +556,10 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
 
             {/* Score 차트 */}
             <div>
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Score - 7일 Rolling Average (1-100)</h3>
-              <div className="h-64">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                Score - 7일 Rolling Average (1-100)
+              </h3>
+              <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={scoreTimeSeriesData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -501,6 +569,7 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
                       tick={{ fill: '#6b7280', fontSize: 10 }}
                       tickLine={false}
                       axisLine={{ stroke: '#e5e7eb' }}
+                      minTickGap={40}
                     />
                     <YAxis
                       domain={[0, 100]}
@@ -541,6 +610,16 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
                         connectNulls
                       />
                     ))}
+                    {scoreTimeSeriesData.length > 48 && (
+                      <Brush
+                        dataKey="time"
+                        height={24}
+                        stroke="#8b5cf6"
+                        fill="#f9fafb"
+                        tickFormatter={formatTime}
+                        startIndex={Math.max(0, scoreTimeSeriesData.length - 48)}
+                      />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -548,64 +627,97 @@ export default function LLMTest({ serviceId: _serviceId }: LLMTestProps) {
           </div>
         )}
 
-        {/* Scatter plot - Latency vs Score */}
-        {scatterChartData.length > 0 && (
+        {/* Pair별 Latency vs Score 요약 비교 */}
+        {scatterSummaryData.length > 0 && (
           <div className="mt-6">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Latency vs Score 분포 ({days}일)</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis
-                    type="number"
-                    dataKey="latencyMs"
-                    name="Latency"
-                    tick={{ fill: '#6b7280', fontSize: 10 }}
-                    tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(1)}s` : `${v}ms`}
-                    label={{ value: 'Latency', position: 'bottom', fontSize: 12 }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="score"
-                    name="Score"
-                    domain={[0, 100]}
-                    tick={{ fill: '#6b7280', fontSize: 10 }}
-                    label={{ value: 'Score', angle: -90, position: 'insideLeft', fontSize: 12 }}
-                  />
-                  <ZAxis range={[50, 50]} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#fff',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                    }}
-                    formatter={(value: number, name: string) => {
-                      if (name === 'Latency') return [`${value}ms`, 'Latency'];
-                      return [value, name];
-                    }}
-                    labelFormatter={(_, payload) => {
-                      if (payload && payload[0]) {
-                        const data = payload[0].payload as { pairName?: string; timestamp?: number };
-                        return `${data.pairName} - ${new Date(data.timestamp || 0).toLocaleString('ko-KR')}`;
-                      }
-                      return '';
-                    }}
-                  />
-                  {selectedPairIds.map((pairId) => {
-                    const pairIndex = pairs.findIndex(p => p.id === pairId);
-                    const pair = pairs[pairIndex];
-                    return (
-                      <Scatter
-                        key={pairId}
-                        name={pair?.name || pairId}
-                        data={scatterChartData.filter(d => d.pairId === pairId)}
-                        fill={getPairColor(pairIndex)}
-                      />
-                    );
-                  })}
-                  <Legend />
-                </ScatterChart>
-              </ResponsiveContainer>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">
+              Latency vs Score 요약 ({days}일)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {scatterSummaryData
+                .filter(d => selectedPairIds.includes(d.pairId))
+                .map(d => {
+                  const pairIndex = pairs.findIndex(p => p.id === d.pairId);
+                  const color = getPairColor(pairIndex);
+                  const fmtMs = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`;
+                  return (
+                    <div
+                      key={d.pairId}
+                      className="rounded-xl border border-gray-100 bg-gray-50/50 p-4"
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                        <span className="text-sm font-medium text-gray-800 truncate">{d.name}</span>
+                        <span className="text-xs text-gray-400 ml-auto flex-shrink-0">{d.count}회</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {/* Latency */}
+                        <div>
+                          <div className="flex items-baseline justify-between mb-1">
+                            <span className="text-xs text-gray-500">Latency</span>
+                            <span className="text-lg font-semibold text-gray-900">{fmtMs(d.avgLatency)}</span>
+                          </div>
+                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                            {(() => {
+                              const max = Math.max(...scatterSummaryData.map(s => s.maxLatency), 1);
+                              const left = (d.p25Latency / max) * 100;
+                              const width = Math.max(((d.p75Latency - d.p25Latency) / max) * 100, 2);
+                              const avgPos = (d.avgLatency / max) * 100;
+                              return (
+                                <>
+                                  <div
+                                    className="absolute top-0 h-full rounded-full opacity-40"
+                                    style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }}
+                                  />
+                                  <div
+                                    className="absolute top-0 h-full w-0.5 rounded"
+                                    style={{ left: `${avgPos}%`, backgroundColor: color }}
+                                  />
+                                </>
+                              );
+                            })()}
+                          </div>
+                          <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                            <span>P25: {fmtMs(d.p25Latency)}</span>
+                            <span>P75: {fmtMs(d.p75Latency)}</span>
+                          </div>
+                        </div>
+
+                        {/* Score */}
+                        <div>
+                          <div className="flex items-baseline justify-between mb-1">
+                            <span className="text-xs text-gray-500">Score</span>
+                            <span className="text-lg font-semibold text-gray-900">{d.avgScore}</span>
+                          </div>
+                          <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
+                            {(() => {
+                              const left = d.p25Score;
+                              const width = Math.max(d.p75Score - d.p25Score, 2);
+                              const avgPos = d.avgScore;
+                              return (
+                                <>
+                                  <div
+                                    className="absolute top-0 h-full rounded-full opacity-40"
+                                    style={{ left: `${left}%`, width: `${width}%`, backgroundColor: color }}
+                                  />
+                                  <div
+                                    className="absolute top-0 h-full w-0.5 rounded"
+                                    style={{ left: `${avgPos}%`, backgroundColor: color }}
+                                  />
+                                </>
+                              );
+                            })()}
+                          </div>
+                          <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
+                            <span>P25: {d.p25Score}</span>
+                            <span>P75: {d.p75Score}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}
