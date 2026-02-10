@@ -44,44 +44,53 @@ const DATE_RANGE_OPTIONS = [
   { label: '1년', value: 365 },
 ];
 
+type Granularity = 'daily' | 'weekly';
+
 export default function WeeklyBusinessDAUChart() {
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [chartData, setChartData] = useState<ChartDataItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(90);
+  const [granularity, setGranularity] = useState<Granularity>('daily');
 
   useEffect(() => {
     loadData();
-  }, [days]);
+  }, [days, granularity]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const response = await statsApi.weeklyBusinessDau(days);
+      const response = await statsApi.weeklyBusinessDau(days, granularity);
       setServices(response.data.services);
       setChartData(response.data.chartData);
     } catch (error) {
-      console.error('Failed to load weekly business DAU data:', error);
+      console.error('Failed to load business DAU data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatWeek = (weekStr: string): string => {
-    const date = new Date(weekStr);
+  const formatDate = (dateStr: string): string => {
+    const date = new Date(dateStr);
     const month = date.getMonth() + 1;
     const day = date.getDate();
     return `${month}/${day}`;
   };
 
-  // Calculate tick interval based on number of weeks
+  // Calculate tick interval based on data points
   const tickInterval = useMemo(() => {
-    const weeks = chartData.length;
-    if (weeks <= 6) return 0;
-    if (weeks <= 13) return 1;
-    if (weeks <= 26) return 2;
+    const count = chartData.length;
+    if (granularity === 'daily') {
+      if (count <= 14) return 0;
+      if (count <= 31) return 1;
+      if (count <= 90) return 4;
+      return 9;
+    }
+    if (count <= 6) return 0;
+    if (count <= 13) return 1;
+    if (count <= 26) return 2;
     return 3;
-  }, [chartData.length]);
+  }, [chartData.length, granularity]);
 
   // Calculate stats for each service
   const serviceStats = useMemo(() => {
@@ -105,6 +114,14 @@ export default function WeeklyBusinessDAUChart() {
     return stats;
   }, [chartData, services]);
 
+  const title = granularity === 'daily'
+    ? '서비스별 일별 DAU (영업일)'
+    : '서비스별 주간 평균 DAU (영업일)';
+
+  const subtitle = granularity === 'daily'
+    ? '주말 및 휴일 제외한 일별 활성 사용자'
+    : '주말 및 휴일 제외한 주간 평균 일일 활성 사용자';
+
   if (loading) {
     return (
       <div className="bg-white rounded-2xl shadow-card p-6">
@@ -123,24 +140,50 @@ export default function WeeklyBusinessDAUChart() {
             <Calendar className="w-5 h-5 text-orange-500" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">서비스별 주간 평균 DAU (영업일)</h2>
-            <p className="text-sm text-gray-500 mt-0.5">주말 및 휴일 제외한 주간 평균 일일 활성 사용자</p>
+            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {DATE_RANGE_OPTIONS.map((option) => (
+        <div className="flex items-center gap-3">
+          {/* Granularity toggle */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
             <button
-              key={option.value}
-              onClick={() => setDays(option.value)}
-              className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                days === option.value
-                  ? 'bg-samsung-blue text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              onClick={() => setGranularity('daily')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                granularity === 'daily'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              {option.label}
+              일별
             </button>
-          ))}
+            <button
+              onClick={() => setGranularity('weekly')}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                granularity === 'weekly'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              주간
+            </button>
+          </div>
+          {/* Date range */}
+          <div className="flex items-center gap-2">
+            {DATE_RANGE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setDays(option.value)}
+                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                  days === option.value
+                    ? 'bg-samsung-blue text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -156,8 +199,11 @@ export default function WeeklyBusinessDAUChart() {
                 style={{ borderLeftColor: SERVICE_COLORS[index % SERVICE_COLORS.length] }}
               >
                 <p className="text-xs text-gray-500 truncate">{service.displayName}</p>
-                <p className="text-lg font-bold text-gray-900">{stats?.avg || 0}</p>
-                <p className="text-[10px] text-gray-400">평균 DAU</p>
+                <div className="flex items-baseline gap-2">
+                  <p className="text-lg font-bold text-gray-900">{stats?.latest || 0}</p>
+                  <p className="text-xs text-gray-400">최근</p>
+                </div>
+                <p className="text-[10px] text-gray-400">평균: {stats?.avg || 0} / 최대: {stats?.max || 0}</p>
               </div>
             );
           })}
@@ -175,7 +221,7 @@ export default function WeeklyBusinessDAUChart() {
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey="week"
-                tickFormatter={formatWeek}
+                tickFormatter={formatDate}
                 tick={{ fill: '#6b7280', fontSize: 11 }}
                 tickLine={false}
                 axisLine={{ stroke: '#e5e7eb' }}
@@ -200,6 +246,9 @@ export default function WeeklyBusinessDAUChart() {
                 }}
                 labelFormatter={(label) => {
                   const date = new Date(label);
+                  if (granularity === 'daily') {
+                    return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+                  }
                   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 주`;
                 }}
               />
@@ -217,7 +266,7 @@ export default function WeeklyBusinessDAUChart() {
                   name={service.id}
                   stroke={SERVICE_COLORS[index % SERVICE_COLORS.length]}
                   strokeWidth={2}
-                  dot={{ r: 3, strokeWidth: 2 }}
+                  dot={{ r: granularity === 'daily' ? 2 : 3, strokeWidth: 2 }}
                   activeDot={{ r: 5 }}
                 />
               ))}

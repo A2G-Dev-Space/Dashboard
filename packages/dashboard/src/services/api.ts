@@ -133,7 +133,7 @@ export const statsApi = {
   globalByDeptDaily: (days = 30, topN = 5) => api.get('/admin/stats/global/by-dept-daily', { params: { days, topN } }),
   globalByDeptUsersDaily: (days = 30, topN = 5) => api.get('/admin/stats/global/by-dept-users-daily', { params: { days, topN } }),
   globalByDeptServiceRequestsDaily: (days = 30, topN = 10) => api.get('/admin/stats/global/by-dept-service-requests-daily', { params: { days, topN } }),
-  weeklyBusinessDau: (days = 90) => api.get('/admin/stats/weekly-business-dau', { params: { days } }),
+  weeklyBusinessDau: (days = 90, granularity: 'daily' | 'weekly' = 'weekly') => api.get('/admin/stats/weekly-business-dau', { params: { days, granularity } }),
 
   // Latency stats
   latency: () => api.get('/admin/stats/latency'),

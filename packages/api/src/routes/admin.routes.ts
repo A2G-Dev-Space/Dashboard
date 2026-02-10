@@ -1976,7 +1976,8 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
     // Get per-service statistics
     const serviceStats = await Promise.all(
       services.map(async (service) => {
-        const [totalUsers, todayRequests, avgDailyUsers, avgDailyUsersExcluding, totalTokens] = await Promise.all([
+        const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+        const [totalUsers, todayRequests, todayActiveUsers, avgDailyUsers, avgDailyUsersExcluding, totalTokens, totalRequests] = await Promise.all([
           // Total unique users for this service
           prisma.usageLog.groupBy({
             by: ['userId'],
@@ -1990,9 +1991,19 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           prisma.usageLog.count({
             where: {
               serviceId: service.id,
-              timestamp: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+              timestamp: { gte: todayStart },
             },
           }),
+
+          // Today's active users (distinct)
+          prisma.$queryRaw<Array<{ count: bigint }>>`
+            SELECT COUNT(DISTINCT ul.user_id) as count
+            FROM usage_logs ul
+            INNER JOIN users u ON ul.user_id = u.id
+            WHERE ul.service_id::text = ${service.id}
+              AND ul.timestamp >= ${todayStart}
+              AND u.loginid != 'anonymous'
+          `.then((r) => Number(r[0]?.count || 0)),
 
           // Average daily active users (last 30 days, excluding anonymous)
           prisma.$queryRaw<Array<{ avg_users: number }>>`
@@ -2032,6 +2043,11 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
             where: { serviceId: service.id },
             _sum: { totalTokens: true },
           }).then((r) => r._sum.totalTokens || 0),
+
+          // Total requests (cumulative)
+          prisma.usageLog.count({
+            where: { serviceId: service.id },
+          }),
         ]);
 
         return {
@@ -2040,21 +2056,32 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           serviceDisplayName: service.displayName,
           totalUsers,
           todayRequests,
-          avgDailyActiveUsers: avgDailyUsers,  // Fixed: renamed to match frontend
-          avgDailyActiveUsersExcluding: avgDailyUsersExcluding,  // Excluding weekends & holidays
+          todayActiveUsers,
+          avgDailyActiveUsers: avgDailyUsers,
+          avgDailyActiveUsersExcluding: avgDailyUsersExcluding,
           totalTokens,
+          totalRequests,
           totalModels: service._count.models,
         };
       })
     );
 
     // Overall totals - deduplicate users across services
-    const [uniqueUsersResult, avgDailyActiveResult, avgDailyActiveExcludingResult] = await Promise.all([
+    const todayStart = new Date(new Date().setHours(0, 0, 0, 0));
+    const [uniqueUsersResult, todayActiveResult, avgDailyActiveResult, avgDailyActiveExcludingResult] = await Promise.all([
       prisma.$queryRaw<Array<{ count: bigint }>>`
         SELECT COUNT(DISTINCT user_id) as count
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
         WHERE u.loginid != 'anonymous'
+      `,
+      // Today's active users (deduplicated across all services)
+      prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT COUNT(DISTINCT ul.user_id) as count
+        FROM usage_logs ul
+        INNER JOIN users u ON ul.user_id = u.id
+        WHERE u.loginid != 'anonymous'
+          AND ul.timestamp >= ${todayStart}
       `,
       // Average daily active users (deduplicated across all services)
       prisma.$queryRaw<Array<{ avg_users: number }>>`
@@ -2077,7 +2104,7 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
           INNER JOIN users u ON ul.user_id = u.id
           WHERE u.loginid != 'anonymous'
             AND ul.timestamp >= NOW() - INTERVAL '30 days'
-            AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)  -- Exclude Sunday (0) and Saturday (6)
+            AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
             AND NOT EXISTS (
               SELECT 1 FROM holidays h
               WHERE h.date = DATE(ul.timestamp)
@@ -2087,15 +2114,17 @@ adminRoutes.get('/stats/global/overview', async (_req: AuthenticatedRequest, res
       `,
     ]);
     const uniqueTotalUsers = Number(uniqueUsersResult[0]?.count || 0);
+    const todayActive = Number(todayActiveResult[0]?.count || 0);
     const avgDailyActive = Math.round(avgDailyActiveResult[0]?.avg_users || 0);
     const avgDailyActiveExcluding = Math.round(avgDailyActiveExcludingResult[0]?.avg_users || 0);
 
     const totals = {
       totalServices: services.length,
-      totalUsers: uniqueTotalUsers,  // Deduplicated across all services
-      avgDailyActiveUsers: avgDailyActive,  // Deduplicated daily active users
-      avgDailyActiveUsersExcluding: avgDailyActiveExcluding,  // Excluding weekends & holidays
-      totalRequests: serviceStats.reduce((sum, s) => sum + s.todayRequests, 0),
+      totalUsers: uniqueTotalUsers,
+      todayActiveUsers: todayActive,
+      avgDailyActiveUsers: avgDailyActive,
+      avgDailyActiveUsersExcluding: avgDailyActiveExcluding,
+      totalRequests: serviceStats.reduce((sum, s) => sum + Number(s.totalRequests), 0),
       totalTokens: serviceStats.reduce((sum, s) => sum + Number(s.totalTokens), 0),
     };
 
@@ -2179,13 +2208,15 @@ adminRoutes.get('/stats/global/by-service', async (req: AuthenticatedRequest, re
 
 /**
  * GET /admin/stats/weekly-business-dau
- * 서비스별 주간 평균 영업일 DAU (주말/휴일 제외)
- * Query: ?days= (14-365, default 90), ?weeks= (override days to calculate weeks)
- * Returns weekly average DAU for each service, excluding weekends and holidays
+ * 서비스별 DAU (주말/휴일 제외)
+ * Query: ?days= (14-365, default 90), ?granularity= ('daily' | 'weekly', default 'weekly')
+ * granularity=weekly: 주간 평균 DAU
+ * granularity=daily: 일별 DAU
  */
 adminRoutes.get('/stats/weekly-business-dau', async (req: AuthenticatedRequest, res) => {
   try {
     const days = Math.min(365, Math.max(14, parseInt(req.query['days'] as string) || 90));
+    const granularity = (req.query['granularity'] as string) === 'daily' ? 'daily' : 'weekly';
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
     startDate.setHours(0, 0, 0, 0);
@@ -2196,21 +2227,20 @@ adminRoutes.get('/stats/weekly-business-dau', async (req: AuthenticatedRequest, 
       select: { id: true, name: true, displayName: true },
     });
 
-    // Get weekly business day DAU for each service
-    // Week is defined as ISO week (Monday to Sunday)
-    const weeklyStats = await prisma.$queryRaw<
-      Array<{
-        service_id: string;
-        week_start: Date;
-        avg_daily_users: number;
-        business_days: bigint;
-      }>
-    >`
-      WITH business_day_users AS (
+    const serviceIds = services.map((s) => s.id);
+
+    if (granularity === 'daily') {
+      // Daily DAU per service (business days only)
+      const dailyStats = await prisma.$queryRaw<
+        Array<{
+          service_id: string;
+          log_date: Date;
+          user_count: bigint;
+        }>
+      >`
         SELECT
           ul.service_id::text as service_id,
           DATE(ul.timestamp) as log_date,
-          DATE_TRUNC('week', ul.timestamp)::date as week_start,
           COUNT(DISTINCT ul.user_id) as user_count
         FROM usage_logs ul
         INNER JOIN users u ON ul.user_id = u.id
@@ -2221,55 +2251,116 @@ adminRoutes.get('/stats/weekly-business-dau', async (req: AuthenticatedRequest, 
             SELECT 1 FROM holidays h
             WHERE h.date = DATE(ul.timestamp)
           )
-        GROUP BY ul.service_id, DATE(ul.timestamp), DATE_TRUNC('week', ul.timestamp)
-      )
-      SELECT
-        service_id,
-        week_start,
-        COALESCE(AVG(user_count), 0)::float as avg_daily_users,
-        COUNT(DISTINCT log_date) as business_days
-      FROM business_day_users
-      GROUP BY service_id, week_start
-      ORDER BY week_start ASC, service_id
-    `;
+        GROUP BY ul.service_id, DATE(ul.timestamp)
+        ORDER BY log_date ASC, service_id
+      `;
 
-    // Process into chart data format
-    const weekMap = new Map<string, Record<string, number>>();
-    const serviceIds = services.map((s) => s.id);
+      // Process into chart data format
+      const dateMap = new Map<string, Record<string, number>>();
 
-    // Initialize weeks with all services set to 0
-    for (const stat of weeklyStats) {
-      const weekStr = formatDateToString(stat.week_start);
-      if (!weekMap.has(weekStr)) {
-        const initialData: Record<string, number> = {};
-        for (const serviceId of serviceIds) {
-          initialData[serviceId] = 0;
+      for (const stat of dailyStats) {
+        const dateStr = formatDateToString(stat.log_date);
+        if (!dateMap.has(dateStr)) {
+          const initialData: Record<string, number> = {};
+          for (const serviceId of serviceIds) {
+            initialData[serviceId] = 0;
+          }
+          dateMap.set(dateStr, initialData);
         }
-        weekMap.set(weekStr, initialData);
       }
-    }
 
-    // Fill in actual data
-    for (const stat of weeklyStats) {
-      const weekStr = formatDateToString(stat.week_start);
-      const existing = weekMap.get(weekStr);
-      if (existing && serviceIds.includes(stat.service_id)) {
-        existing[stat.service_id] = Math.round(stat.avg_daily_users);
+      for (const stat of dailyStats) {
+        const dateStr = formatDateToString(stat.log_date);
+        const existing = dateMap.get(dateStr);
+        if (existing && serviceIds.includes(stat.service_id)) {
+          existing[stat.service_id] = Number(stat.user_count);
+        }
       }
+
+      const chartData = Array.from(dateMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, serviceUsage]) => ({
+          week: date,  // reuse 'week' key for chart compatibility
+          ...serviceUsage,
+        }));
+
+      res.json({
+        services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
+        chartData,
+        granularity,
+      });
+    } else {
+      // Weekly average DAU (existing logic)
+      const weeklyStats = await prisma.$queryRaw<
+        Array<{
+          service_id: string;
+          week_start: Date;
+          avg_daily_users: number;
+          business_days: bigint;
+        }>
+      >`
+        WITH business_day_users AS (
+          SELECT
+            ul.service_id::text as service_id,
+            DATE(ul.timestamp) as log_date,
+            DATE_TRUNC('week', ul.timestamp)::date as week_start,
+            COUNT(DISTINCT ul.user_id) as user_count
+          FROM usage_logs ul
+          INNER JOIN users u ON ul.user_id = u.id
+          WHERE ul.timestamp >= ${startDate}
+            AND u.loginid != 'anonymous'
+            AND EXTRACT(DOW FROM ul.timestamp) NOT IN (0, 6)
+            AND NOT EXISTS (
+              SELECT 1 FROM holidays h
+              WHERE h.date = DATE(ul.timestamp)
+            )
+          GROUP BY ul.service_id, DATE(ul.timestamp), DATE_TRUNC('week', ul.timestamp)
+        )
+        SELECT
+          service_id,
+          week_start,
+          COALESCE(AVG(user_count), 0)::float as avg_daily_users,
+          COUNT(DISTINCT log_date) as business_days
+        FROM business_day_users
+        GROUP BY service_id, week_start
+        ORDER BY week_start ASC, service_id
+      `;
+
+      // Process into chart data format
+      const weekMap = new Map<string, Record<string, number>>();
+
+      for (const stat of weeklyStats) {
+        const weekStr = formatDateToString(stat.week_start);
+        if (!weekMap.has(weekStr)) {
+          const initialData: Record<string, number> = {};
+          for (const serviceId of serviceIds) {
+            initialData[serviceId] = 0;
+          }
+          weekMap.set(weekStr, initialData);
+        }
+      }
+
+      for (const stat of weeklyStats) {
+        const weekStr = formatDateToString(stat.week_start);
+        const existing = weekMap.get(weekStr);
+        if (existing && serviceIds.includes(stat.service_id)) {
+          existing[stat.service_id] = Math.round(stat.avg_daily_users);
+        }
+      }
+
+      const chartData = Array.from(weekMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([week, serviceUsage]) => ({
+          week,
+          ...serviceUsage,
+        }));
+
+      res.json({
+        services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
+        chartData,
+        granularity,
+      });
     }
-
-    // Convert to array format sorted by date
-    const chartData = Array.from(weekMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([week, serviceUsage]) => ({
-        week,
-        ...serviceUsage,
-      }));
-
-    res.json({
-      services: services.map((s) => ({ id: s.id, name: s.name, displayName: s.displayName })),
-      chartData,
-    });
   } catch (error) {
     console.error('Get weekly business DAU error:', error);
     res.status(500).json({ error: 'Failed to get weekly business DAU' });

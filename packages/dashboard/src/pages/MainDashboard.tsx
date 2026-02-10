@@ -57,6 +57,7 @@ interface GlobalOverviewService {
   serviceName: string;
   serviceDisplayName: string;
   totalUsers: number;
+  todayActiveUsers: number;
   avgDailyActiveUsers: number;
   totalTokens: number;
   totalRequests: number;
@@ -96,8 +97,9 @@ interface DeptServiceRequestsDaily {
 interface GlobalTotals {
   totalServices: number;
   totalUsers: number;
+  todayActiveUsers: number;
   avgDailyActiveUsers: number;
-  avgDailyActiveUsersExcluding: number;  // 주말/휴일 제외
+  avgDailyActiveUsersExcluding: number;
   totalRequests: number;
   totalTokens: number;
 }
@@ -271,6 +273,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
       serviceDisplayName: service.displayName,
       iconUrl: service.iconUrl,
       totalUsers: stats?.totalUsers || 0,
+      todayActiveUsers: stats?.todayActiveUsers || 0,
       avgDailyActiveUsers: stats?.avgDailyActiveUsers || 0,
       totalTokens: stats?.totalTokens || 0,
       totalRequests: stats?.totalRequests || 0,
@@ -287,6 +290,7 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
 
   // Use deduplicated totals from API (users/avgDailyActiveUsers are deduplicated across services)
   const totalUsers = globalTotals?.totalUsers ?? 0;
+  const todayActive = globalTotals?.todayActiveUsers ?? 0;
   const avgDailyActive = globalTotals?.avgDailyActiveUsers ?? 0;
   const avgDailyActiveExcluding = globalTotals?.avgDailyActiveUsersExcluding ?? 0;
   const totalTokens = globalTotals?.totalTokens ?? globalOverview.reduce((sum, s) => sum + s.totalTokens, 0);
@@ -527,12 +531,12 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300">
+        <div className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300 border-l-4 border-emerald-400">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-500">일평균 활성 사용자</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(Math.round(avgDailyActive))}</p>
-              <p className="text-xs text-gray-400 mt-1">최근 30일 평균</p>
+              <p className="text-sm font-medium text-gray-500">오늘 DAU</p>
+              <p className="text-2xl font-bold text-emerald-600 mt-1">{formatNumber(todayActive)}</p>
+              <p className="text-xs text-gray-400 mt-1">30일 평균: {formatNumber(Math.round(avgDailyActive))}명</p>
             </div>
             <div className="p-3 rounded-xl bg-emerald-50">
               <Activity className="w-5 h-5 text-emerald-500" />
@@ -542,9 +546,9 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
         <div className="bg-white rounded-2xl shadow-card p-5 hover:shadow-soft transition-shadow duration-300 border-l-4 border-orange-400">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-500">DAU (주말/휴일 제외)</p>
+              <p className="text-sm font-medium text-gray-500">영업일 평균 DAU</p>
               <p className="text-2xl font-bold text-orange-600 mt-1">{formatNumber(Math.round(avgDailyActiveExcluding))}</p>
-              <p className="text-xs text-gray-400 mt-1">최근 한달 영업일 평균</p>
+              <p className="text-xs text-gray-400 mt-1">최근 30일, 주말/휴일 제외</p>
             </div>
             <div className="p-3 rounded-xl bg-orange-50">
               <Activity className="w-5 h-5 text-orange-500" />
@@ -643,9 +647,11 @@ export default function MainDashboard({ adminRole }: MainDashboardProps) {
                     <p className="text-lg font-bold text-gray-900">{formatNumber(service.totalUsers)}</p>
                     <p className="text-xs text-gray-500">사용자</p>
                   </div>
-                  <div className="p-2 bg-gray-50 rounded-lg">
-                    <p className="text-lg font-bold text-gray-900">{formatNumber(Math.round(service.avgDailyActiveUsers))}</p>
-                    <p className="text-xs text-gray-500">일평균</p>
+                  <div className={`p-2 rounded-lg ${service.todayActiveUsers > 0 ? 'bg-emerald-50' : 'bg-gray-50'}`}>
+                    <p className={`text-lg font-bold ${service.todayActiveUsers > 0 ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      {formatNumber(service.todayActiveUsers)}
+                    </p>
+                    <p className="text-xs text-gray-500">오늘 DAU</p>
                   </div>
                   <div className="p-2 bg-gray-50 rounded-lg">
                     <p className="text-lg font-bold text-gray-900">{formatNumber(service.totalTokens)}</p>
