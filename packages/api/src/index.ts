@@ -82,15 +82,26 @@ app.use('/v1', proxyRoutes);
 // Error handling middleware
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env['NODE_ENV'] === 'development' ? err.message : undefined,
-  });
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: 'Internal server error',
+      message: process.env['NODE_ENV'] === 'development' ? err.message : undefined,
+    });
+  }
 });
 
 // 404 handler
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
+});
+
+// Crash protection - prevent single error from killing the process
+process.on('uncaughtException', (err) => {
+  console.error(`[PID ${process.pid}] Uncaught exception:`, err);
+  setTimeout(() => process.exit(1), 3000);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(`[PID ${process.pid}] Unhandled rejection:`, reason);
 });
 
 // Graceful shutdown
@@ -143,9 +154,12 @@ async function main() {
     // Ensure default service exists
     await ensureDefaultService();
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`AX Portal API server running on port ${PORT}`);
     });
+    // Must be > nginx keepalive_timeout (60s) to prevent "connection reset by peer"
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
 
     // Start LLM test scheduler
     startLLMTestScheduler();
