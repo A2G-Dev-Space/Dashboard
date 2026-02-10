@@ -95,6 +95,9 @@ model Model {
   // LLM 호출 시 추가 헤더 (JSON object, e.g. {"X-Custom": "value"})
   extraHeaders Json?   @map("extra_headers")
 
+  // Vision Language Model 지원 여부
+  supportsVision Boolean @default(false) @map("supports_vision")
+
   // 서비스 연결 (nullable for migration, then required)
   serviceId   String?  @map("service_id")
   service     Service? @relation(fields: [serviceId], references: [id])

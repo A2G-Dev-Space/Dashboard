@@ -321,6 +321,7 @@ const modelSchema = z.object({
   extraHeaders: z.record(z.string()).optional(),  // { "X-Custom": "value" }
   maxTokens: z.number().int().min(1).max(1000000).default(128000),
   enabled: z.boolean().default(true),
+  supportsVision: z.boolean().default(false),
   serviceId: z.string().uuid().optional(),
   allowedBusinessUnits: z.array(z.string()).optional(),
 });

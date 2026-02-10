@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2, Eye } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
 
 interface SubModel {
@@ -27,6 +27,7 @@ interface Model {
   creator?: { loginid: string };
   serviceId?: string;
   service?: { id: string; name: string; displayName: string };
+  supportsVision: boolean;
   allowedBusinessUnits?: string[];
   subModels?: SubModel[];
 }
@@ -282,7 +283,15 @@ export default function Models({ serviceId }: ModelsProps) {
                       <Server className="w-5 h-5 text-samsung-blue" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{model.displayName}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-medium text-gray-900">{model.displayName}</p>
+                        {model.supportsVision && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-700" title="Vision Language Model">
+                            <Eye className="w-3 h-3" />
+                            VL
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-gray-500">{model.name}</p>
                     </div>
                   </div>
@@ -519,6 +528,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     extraHeadersJson: model?.extraHeaders && Object.keys(model.extraHeaders).length > 0 ? JSON.stringify(model.extraHeaders, null, 2) : '',
     maxTokens: model?.maxTokens || 128000,
     enabled: model?.enabled ?? true,
+    supportsVision: model?.supportsVision ?? false,
     serviceId: model?.serviceId || serviceId || '',
     allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
   });
@@ -811,17 +821,32 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="enabled"
-              checked={formData.enabled}
-              onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
-              className="w-4 h-4 text-samsung-blue rounded focus:ring-samsung-blue"
-            />
-            <label htmlFor="enabled" className="text-sm text-gray-700">
-              Enable this model
-            </label>
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="enabled"
+                checked={formData.enabled}
+                onChange={(e) => setFormData({ ...formData, enabled: e.target.checked })}
+                className="w-4 h-4 text-samsung-blue rounded focus:ring-samsung-blue"
+              />
+              <label htmlFor="enabled" className="text-sm text-gray-700">
+                Enable this model
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="supportsVision"
+                checked={formData.supportsVision}
+                onChange={(e) => setFormData({ ...formData, supportsVision: e.target.checked })}
+                className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-600"
+              />
+              <label htmlFor="supportsVision" className="text-sm text-gray-700 flex items-center gap-1">
+                <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                Vision (VL) 지원
+              </label>
+            </div>
           </div>
 
           {/* 사업부 제한 */}

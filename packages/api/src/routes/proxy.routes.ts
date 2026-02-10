@@ -292,6 +292,7 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
         displayName: true,
         maxTokens: true,
         sortOrder: true,
+        supportsVision: true,
         allowedBusinessUnits: true,
         service: {
           select: {
@@ -336,8 +337,10 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
         // Custom fields
         _nexus: {
           id: model.id,
+          modelName: model.name,
           displayName: model.displayName,
           maxTokens: model.maxTokens,
+          supportsVision: model.supportsVision,
         },
       })),
     });
@@ -993,6 +996,7 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
         name: true,
         displayName: true,
         maxTokens: true,
+        supportsVision: true,
         allowedBusinessUnits: true,
         service: {
           select: {
@@ -1031,8 +1035,10 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
       parent: null,
       _nexus: {
         id: model.id,
+        modelName: model.name,
         displayName: model.displayName,
         maxTokens: model.maxTokens,
+        supportsVision: model.supportsVision,
       },
     });
   } catch (error) {
