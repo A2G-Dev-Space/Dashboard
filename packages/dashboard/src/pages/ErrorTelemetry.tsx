@@ -226,7 +226,7 @@ export default function ErrorTelemetry() {
             {stats.errorsByCode.map((e) => (
               <button
                 key={e.errorCode}
-                onClick={() => setFilterErrorCode(filterErrorCode === e.errorCode ? '' : e.errorCode)}
+                onClick={() => { setFilterErrorCode(filterErrorCode === e.errorCode ? '' : e.errorCode); setPagination(p => ({ ...p, page: 1 })); }}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
                   filterErrorCode === e.errorCode
                     ? 'bg-samsung-blue text-white ring-2 ring-samsung-blue/30'
