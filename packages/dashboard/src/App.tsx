@@ -11,6 +11,7 @@ import MyUsage from './pages/MyUsage';
 import Login from './pages/Login';
 import Holidays from './pages/Holidays';
 import LLMTest from './pages/LLMTest';
+import ErrorTelemetry from './pages/ErrorTelemetry';
 import { authApi } from './services/api';
 
 interface User {
@@ -125,6 +126,11 @@ function App() {
             {/* LLM 테스트 (SUPER_ADMIN만) */}
             {adminRole === 'SUPER_ADMIN' && (
               <Route path="/llm-test" element={<LLMTest />} />
+            )}
+
+            {/* 에러 텔레메트리 (SUPER_ADMIN만) */}
+            {adminRole === 'SUPER_ADMIN' && (
+              <Route path="/error-telemetry" element={<ErrorTelemetry />} />
             )}
 
             {/* 서비스별 라우트 */}

@@ -1,6 +1,6 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BookOpen, BarChart3, Home, Layers, CalendarDays, FlaskConical } from 'lucide-react';
+import { LayoutDashboard, Server, Users, LogOut, Menu, X, ChevronRight, ChevronDown, MessageSquare, Shield, BookOpen, BarChart3, Home, Layers, CalendarDays, FlaskConical, AlertTriangle } from 'lucide-react';
 import { serviceApi } from '../services/api';
 
 interface User {
@@ -112,6 +112,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
     if (location.pathname === '/users') return '사용자 관리';
     if (location.pathname === '/holidays') return '휴일 관리';
     if (location.pathname === '/llm-test') return 'LLM 테스트';
+    if (location.pathname === '/error-telemetry') return '에러 텔레메트리';
     if (location.pathname === '/my-usage') return '내 사용량';
     if (location.pathname === '/feedback') return '피드백';
     if (location.pathname.startsWith('/service/')) {
@@ -229,6 +230,22 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
                   <FlaskConical className={`w-5 h-5 ${location.pathname === '/llm-test' ? 'text-samsung-blue' : 'text-pastel-400 group-hover:text-pastel-600'}`} />
                   <span className="font-medium">LLM 테스트</span>
                   {location.pathname === '/llm-test' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
+                </Link>
+              )}
+              {/* SUPER_ADMIN만 에러 텔레메트리 */}
+              {adminRole === 'SUPER_ADMIN' && (
+                <Link
+                  to="/error-telemetry"
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all duration-200 group ${
+                    location.pathname === '/error-telemetry'
+                      ? 'bg-pastel-100 text-pastel-700 shadow-sm'
+                      : 'text-pastel-600 hover:bg-pastel-50 hover:text-pastel-700'
+                  }`}
+                >
+                  <AlertTriangle className={`w-5 h-5 ${location.pathname === '/error-telemetry' ? 'text-samsung-blue' : 'text-pastel-400 group-hover:text-pastel-600'}`} />
+                  <span className="font-medium">에러 텔레메트리</span>
+                  {location.pathname === '/error-telemetry' && <ChevronRight className="w-4 h-4 ml-auto text-samsung-blue" />}
                 </Link>
               )}
             </div>

@@ -28,6 +28,7 @@ model Service {
   ratingFeedbacks RatingFeedback[]
   adminServices   AdminService[]
   userServices    UserService[]  // 서비스별 사용자 활동
+  errorLogs       ErrorLog[]
 
   @@map("services")
 }
@@ -49,6 +50,7 @@ model User {
   dailyUsageStats DailyUsageStat[]
   feedbacks       Feedback[]
   userServices    UserService[]  // 서비스별 활동 추적
+  errorLogs       ErrorLog[]
 
   @@map("users")
 }
@@ -407,4 +409,35 @@ model LLMTestResult {
   @@index([pairId])
   @@index([timestamp])
   @@map("llm_test_results")
+}
+
+// ============================================
+// 에러 로그 (CLI/Electron 에러 텔레메트리)
+// ============================================
+model ErrorLog {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  serviceId     String?  @map("service_id")
+
+  source        String                          // "cli" | "electron"
+  appVersion    String   @map("app_version")
+  platform      String?                         // "win32" | "linux" | "darwin"
+
+  errorName     String   @map("error_name")     // "APIError", "TokenLimitError"
+  errorCode     String   @map("error_code")     // "API_ERROR", "TOKEN_LIMIT_ERROR"
+  errorMessage  String   @map("error_message") @db.Text
+  stackTrace    String?  @map("stack_trace")   @db.Text
+  isRecoverable Boolean  @default(false) @map("is_recoverable")
+  context       Json?                           // { statusCode, endpoint, modelId, ... }
+
+  timestamp     DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  service Service? @relation(fields: [serviceId], references: [id])
+
+  @@index([userId])
+  @@index([serviceId])
+  @@index([errorCode])
+  @@index([timestamp])
+  @@map("error_logs")
 }

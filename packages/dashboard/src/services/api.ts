@@ -297,6 +297,38 @@ export const llmTestApi = {
     }>('/llm-test/stats'),
 };
 
+// 에러 텔레메트리 API
+export const errorTelemetryApi = {
+  logs: (params?: { page?: number; limit?: number; source?: string; errorCode?: string; userId?: string; serviceId?: string; days?: number }) =>
+    api.get<{ logs: ErrorLogItem[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>('/error-telemetry/logs', { params }),
+  stats: (days = 30) =>
+    api.get<{
+      totalErrors: number;
+      affectedUsers: number;
+      errorsByCode: Array<{ errorCode: string; count: number }>;
+      errorsBySource: Array<{ source: string; count: number }>;
+      dailyTrend: Array<{ date: string; count: number }>;
+    }>('/error-telemetry/stats', { params: { days } }),
+  delete: (id: string) => api.delete(`/error-telemetry/logs/${id}`),
+  cleanup: () => api.post<{ deleted: number }>('/error-telemetry/cleanup'),
+};
+
+export interface ErrorLogItem {
+  id: string;
+  source: string;
+  appVersion: string;
+  platform: string | null;
+  errorName: string;
+  errorCode: string;
+  errorMessage: string;
+  stackTrace: string | null;
+  isRecoverable: boolean;
+  context: Record<string, unknown> | null;
+  timestamp: string;
+  user: { id: string; loginid: string; username: string; deptname: string };
+  service: { id: string; name: string; displayName: string } | null;
+}
+
 // 휴일 관리 API
 export interface Holiday {
   id: string;

@@ -23,6 +23,8 @@ import { serviceRoutes } from './routes/service.routes.js';
 import { holidaysRoutes } from './routes/holidays.routes.js';
 import { llmTestRoutes } from './routes/llm-test.routes.js';
 import { startLLMTestScheduler, stopLLMTestScheduler } from './services/llm-test.service.js';
+import { errorTelemetryRoutes } from './routes/error-telemetry.routes.js';
+import { startErrorCleanupScheduler } from './services/error-cleanup.service.js';
 import { requestLogger } from './middleware/requestLogger.js';
 
 // Load environment variables
@@ -75,6 +77,7 @@ app.use('/my-usage', myUsageRoutes);
 app.use('/rating', ratingRoutes);
 app.use('/holidays', holidaysRoutes);
 app.use('/llm-test', llmTestRoutes);
+app.use('/error-telemetry', errorTelemetryRoutes);
 
 // LLM Proxy Routes (OpenAI-compatible)
 app.use('/v1', proxyRoutes);
@@ -163,6 +166,9 @@ async function main() {
 
     // Start LLM test scheduler
     startLLMTestScheduler();
+
+    // Start error log cleanup scheduler
+    startErrorCleanupScheduler(prisma);
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
