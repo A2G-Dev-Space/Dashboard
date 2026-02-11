@@ -164,7 +164,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
         </div>
 
         {/* Navigation */}
-        <nav className="mt-4 px-3 pb-24">
+        <nav className="mt-4 px-3 pb-4">
           {/* Admin 섹션: 통합 대시보드 */}
           {isAdmin && (
             <div className="mb-4">
@@ -362,7 +362,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
         </nav>
 
         {/* User info */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-pastel-100 bg-white">
+        <div className="p-4 border-t border-pastel-100">
           <div className="flex items-center justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">

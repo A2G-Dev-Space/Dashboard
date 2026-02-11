@@ -7,8 +7,8 @@ hero:
   tagline: WSL 없이 Windows에서 바로 사용하는 AI Coding Agent
   actions:
     - theme: brand
-      text: 다운로드 (v4.0.11)
-      link: http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.0.11.exe
+      text: 다운로드 (v4.4.0)
+      link: http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.4.0.exe
     - theme: alt
       text: 사용 가이드
       link: /guide-windows/getting-started
@@ -51,7 +51,7 @@ features:
 
 아래 버튼을 클릭하여 설치 파일을 다운로드합니다:
 
-**[Nexus Coder (For Windows) Setup 4.0.11 다운로드](http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.0.11.exe)** (~99MB)
+**[Nexus Coder (For Windows) Setup 4.4.0 다운로드](http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Coder%20(For%20Windows)-Setup-4.4.0.exe)** (~99MB)
 
 ::: warning 다운로드가 안 될 경우
 - 사내망에 연결되어 있는지 확인하세요
@@ -60,7 +60,7 @@ features:
 
 ### 2. 설치
 
-다운로드한 `Nexus Coder (For Windows)-Setup-4.0.11.exe`를 실행합니다.
+다운로드한 `Nexus Coder (For Windows)-Setup-4.4.0.exe`를 실행합니다.
 
 - 설치 경로를 선택하고 **Install** 클릭
 - 기본 경로: `C:\Users\{사용자}\AppData\Local\Programs\Nexus Coder (For Windows)`
