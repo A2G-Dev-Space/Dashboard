@@ -18,6 +18,9 @@ import {
   Users,
   Bug,
   Filter,
+  Copy,
+  Check,
+  CheckSquare,
 } from 'lucide-react';
 import { errorTelemetryApi, type ErrorLogItem } from '../services/api';
 
@@ -47,6 +50,8 @@ export default function ErrorTelemetry() {
   });
   const [loading, setLoading] = useState(true);
   const [selectedLog, setSelectedLog] = useState<ErrorLogItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // 필터
   const [filterSource, setFilterSource] = useState<string>('');
@@ -70,6 +75,7 @@ export default function ErrorTelemetry() {
       setLogs(logsRes.data.logs);
       setPagination(logsRes.data.pagination);
       setStats(statsRes.data);
+      setSelectedIds(new Set());
     } catch (error) {
       console.error('Failed to load error telemetry:', error);
     } finally {
@@ -131,6 +137,64 @@ export default function ErrorTelemetry() {
     if (code.includes('QUOTA'))
       return 'bg-purple-100 text-purple-700';
     return 'bg-pastel-100 text-pastel-700';
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === logs.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(logs.map((l) => l.id)));
+    }
+  };
+
+  const handleCopySelected = async () => {
+    const selected = logs
+      .filter((l) => selectedIds.has(l.id))
+      .map((l) => ({
+        id: l.id,
+        timestamp: l.timestamp,
+        source: l.source,
+        appVersion: l.appVersion,
+        platform: l.platform,
+        errorName: l.errorName,
+        errorCode: l.errorCode,
+        errorMessage: l.errorMessage,
+        isRecoverable: l.isRecoverable,
+        stackTrace: l.stackTrace || null,
+        context: l.context || null,
+        user: {
+          loginid: l.user.loginid,
+          username: l.user.username,
+          deptname: l.user.deptname,
+        },
+        service: l.service
+          ? { name: l.service.name, displayName: l.service.displayName }
+          : null,
+      }));
+
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(selected, null, 2));
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = JSON.stringify(selected, null, 2);
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    }
   };
 
   return (
@@ -298,6 +362,20 @@ export default function ErrorTelemetry() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-pastel-100 bg-pastel-50/50">
+                  <th className="w-10 px-3 py-3">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSelectAll(); }}
+                      className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-all ${
+                        logs.length > 0 && selectedIds.size === logs.length
+                          ? 'bg-samsung-blue border-samsung-blue text-white'
+                          : selectedIds.size > 0
+                            ? 'bg-samsung-blue/20 border-samsung-blue text-samsung-blue'
+                            : 'border-pastel-300 hover:border-pastel-400'
+                      }`}
+                    >
+                      {selectedIds.size > 0 && <Check className="w-3 h-3" strokeWidth={3} />}
+                    </button>
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">시간</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">에러</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">사용자</th>
@@ -312,8 +390,22 @@ export default function ErrorTelemetry() {
                   <tr
                     key={log.id}
                     onClick={() => setSelectedLog(log)}
-                    className="border-b border-pastel-50 hover:bg-pastel-50/50 cursor-pointer transition-colors"
+                    className={`border-b border-pastel-50 hover:bg-pastel-50/50 cursor-pointer transition-colors ${
+                      selectedIds.has(log.id) ? 'bg-samsung-blue/5' : ''
+                    }`}
                   >
+                    <td className="px-3 py-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(log.id); }}
+                        className={`w-[18px] h-[18px] rounded border-2 flex items-center justify-center transition-all ${
+                          selectedIds.has(log.id)
+                            ? 'bg-samsung-blue border-samsung-blue text-white'
+                            : 'border-pastel-300 hover:border-samsung-blue'
+                        }`}
+                      >
+                        {selectedIds.has(log.id) && <Check className="w-3 h-3" strokeWidth={3} />}
+                      </button>
+                    </td>
                     <td className="px-4 py-3 text-xs text-pastel-500 whitespace-nowrap">
                       {formatDate(log.timestamp)}
                     </td>
@@ -384,6 +476,43 @@ export default function ErrorTelemetry() {
           </div>
         )}
       </div>
+
+      {/* 선택 액션 바 */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-4 animate-slide-up">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-samsung-blue" />
+            <span className="text-sm font-medium">{selectedIds.size}건 선택</span>
+          </div>
+          <div className="w-px h-5 bg-white/20" />
+          <button
+            onClick={handleCopySelected}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              copySuccess
+                ? 'bg-green-500 text-white'
+                : 'bg-white/10 hover:bg-white/20 text-white'
+            }`}
+          >
+            {copySuccess ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                복사됨!
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                JSON 복사
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* 상세 모달 */}
       {selectedLog && (
