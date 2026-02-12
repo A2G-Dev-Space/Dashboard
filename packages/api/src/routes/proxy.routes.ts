@@ -661,9 +661,11 @@ async function handleNonStreamingRequest(
         if (response.status >= 400 && response.status < 500) {
           if (response.status === 400 && isMaxTokensError(errorText)) {
             res.status(400).json({
-              error: 'Input too long',
-              message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
-              details: errorText,
+              error: {
+                message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
+                type: 'invalid_request_error',
+                code: 'context_length_exceeded',
+              },
             });
           } else {
             res.status(response.status).json({ error: 'LLM request failed', details: errorText });
@@ -749,9 +751,11 @@ async function handleStreamingRequest(
         if (isMaxTokensError(errorText)) {
           clearTimeout(timeoutId);
           res.status(400).json({
-            error: 'Input too long',
-            message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
-            details: errorText,
+            error: {
+              message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
+              type: 'invalid_request_error',
+              code: 'context_length_exceeded',
+            },
           });
           return true;
         }
@@ -821,9 +825,11 @@ async function handleStreamingRequest(
         if (response.status >= 400 && response.status < 500) {
           if (response.status === 400 && isMaxTokensError(errorText)) {
             res.status(400).json({
-              error: 'Input too long',
-              message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
-              details: errorText,
+              error: {
+                message: 'The input prompt exceeds the model\'s maximum context length. Please reduce the input size.',
+                type: 'invalid_request_error',
+                code: 'context_length_exceeded',
+              },
             });
           } else {
             res.status(response.status).json({ error: 'LLM request failed', details: errorText });
