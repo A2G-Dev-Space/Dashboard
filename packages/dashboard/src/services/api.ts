@@ -310,6 +310,7 @@ export const errorTelemetryApi = {
       dailyTrend: Array<{ date: string; count: number }>;
     }>('/error-telemetry/stats', { params: { days } }),
   delete: (id: string) => api.delete(`/error-telemetry/logs/${id}`),
+  bulkDelete: (ids: string[]) => api.post<{ deleted: number }>('/error-telemetry/logs/bulk-delete', { ids }),
   cleanup: () => api.post<{ deleted: number }>('/error-telemetry/cleanup'),
 };
 

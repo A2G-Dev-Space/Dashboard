@@ -156,6 +156,19 @@ export default function ErrorTelemetry() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`선택한 ${selectedIds.size}건의 에러 로그를 삭제하시겠습니까?`)) return;
+    try {
+      const res = await errorTelemetryApi.bulkDelete(Array.from(selectedIds));
+      alert(`${res.data.deleted}건이 삭제되었습니다.`);
+      setSelectedIds(new Set());
+      loadData();
+    } catch (error) {
+      console.error('Failed to bulk delete:', error);
+      alert('삭제에 실패했습니다.');
+    }
+  };
+
   const handleCopySelected = async () => {
     const selected = logs
       .filter((l) => selectedIds.has(l.id))
@@ -504,6 +517,13 @@ export default function ErrorTelemetry() {
                 JSON 복사
               </>
             )}
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-red-500/80 hover:bg-red-500 text-white transition-all"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            선택 삭제
           </button>
           <button
             onClick={() => setSelectedIds(new Set())}

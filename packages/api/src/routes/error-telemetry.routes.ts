@@ -297,6 +297,34 @@ errorTelemetryRoutes.get(
 );
 
 // ============================================
+// POST /logs/bulk-delete — 선택 일괄 삭제 (SUPER_ADMIN)
+// ============================================
+errorTelemetryRoutes.post(
+  '/logs/bulk-delete',
+  authenticateToken,
+  requireAdmin,
+  requireSuperAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        res.status(400).json({ error: 'ids array is required' });
+        return;
+      }
+
+      const result = await prisma.errorLog.deleteMany({
+        where: { id: { in: ids } },
+      });
+
+      res.json({ deleted: result.count });
+    } catch (error) {
+      console.error('Error telemetry bulk delete error:', error);
+      res.status(500).json({ error: 'Failed to bulk delete error logs' });
+    }
+  },
+);
+
+// ============================================
 // DELETE /logs/:id — 개별 삭제 (SUPER_ADMIN)
 // ============================================
 errorTelemetryRoutes.delete(
