@@ -94,6 +94,9 @@ model Model {
   // 사업부 제한 (빈 배열 = 제한 없음, 모든 사업부 허용)
   allowedBusinessUnits String[] @default([]) @map("allowed_business_units")
 
+  // 슈퍼 관리자 전용 (true면 SUPER_ADMIN만 사용 가능)
+  superAdminOnly Boolean @default(false) @map("super_admin_only")
+
   // LLM 호출 시 추가 헤더 (JSON object, e.g. {"X-Custom": "value"})
   extraHeaders Json?   @map("extra_headers")
 

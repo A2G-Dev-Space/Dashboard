@@ -9,8 +9,23 @@
 import { Router, Request, Response } from 'express';
 import { prisma, redis } from '../index.js';
 import { incrementUsage, trackActiveUser } from '../services/redis.service.js';
+import { isDeveloper } from '../middleware/auth.js';
 
 export const proxyRoutes = Router();
+
+/**
+ * 사용자가 슈퍼 관리자인지 확인
+ * DEVELOPERS 환경변수 또는 DB Admin 테이블에서 확인
+ */
+async function isUserSuperAdmin(loginid: string): Promise<boolean> {
+  if (!loginid || loginid === 'anonymous') return false;
+  if (isDeveloper(loginid)) return true;
+  const admin = await prisma.admin.findUnique({
+    where: { loginid },
+    select: { role: true },
+  });
+  return admin?.role === 'SUPER_ADMIN';
+}
 
 // ============================================
 // 라운드로빈 엔드포인트 선택
@@ -294,6 +309,7 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
         sortOrder: true,
         supportsVision: true,
         allowedBusinessUnits: true,
+        superAdminOnly: true,
         service: {
           select: {
             name: true,
@@ -306,19 +322,30 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
       ],
     });
 
+    // 슈퍼 관리자 전용 모델 필터링
+    const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+    const hasSuperAdminModels = models.some((m) => m.superAdminOnly);
+    const userIsSuperAdmin = hasSuperAdminModels ? await isUserSuperAdmin(loginid) : false;
+
     // 사업부 제한 필터링: X-User-Dept 헤더에서 businessUnit 추출
     const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
     const businessUnit = extractBusinessUnit(deptname);
     const hasRestricted = models.some((m) => m.allowedBusinessUnits.length > 0);
 
     let filtered = models;
+
+    // 슈퍼 관리자 전용 필터
+    if (hasSuperAdminModels && !userIsSuperAdmin) {
+      filtered = filtered.filter((m) => !m.superAdminOnly);
+    }
+
+    // 사업부 필터
     if (hasRestricted && !businessUnit) {
       // X-User-Dept 헤더 없이 호출 → 경고 로그만 남기고 전체 반환
-      const loginid = (req.headers['x-user-id'] as string) || 'unknown';
       const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
       console.warn(`[BU-Filter] GET /v1/models called without X-User-Dept header: user=${loginid}, service=${serviceHeader}`);
     } else if (businessUnit) {
-      filtered = models.filter(
+      filtered = filtered.filter(
         (m) => m.allowedBusinessUnits.length === 0 || m.allowedBusinessUnits.includes(businessUnit)
       );
     }
@@ -396,6 +423,15 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     if (!model) {
       res.status(404).json({ error: `Model '${modelName}' not found or disabled` });
       return;
+    }
+
+    // 슈퍼 관리자 전용 모델 체크
+    if (model.superAdminOnly) {
+      const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+      if (!(await isUserSuperAdmin(loginid))) {
+        res.status(403).json({ error: `Model '${modelName}' is restricted to super admins only` });
+        return;
+      }
     }
 
     // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
@@ -1003,6 +1039,7 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
         displayName: true,
         maxTokens: true,
         supportsVision: true,
+        superAdminOnly: true,
         allowedBusinessUnits: true,
         service: {
           select: {
@@ -1015,6 +1052,15 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
     if (!model) {
       res.status(404).json({ error: 'Model not found' });
       return;
+    }
+
+    // 슈퍼 관리자 전용 모델 체크
+    if (model.superAdminOnly) {
+      const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+      if (!(await isUserSuperAdmin(loginid))) {
+        res.status(403).json({ error: `Model '${modelName}' is restricted to super admins only` });
+        return;
+      }
     }
 
     // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)

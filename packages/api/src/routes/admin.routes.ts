@@ -195,7 +195,6 @@ async function testToolCall(
   const requestBody = {
     model: modelName,
     messages: [{ role: 'user', content: 'What is the current time? Use the get_current_time tool.' }],
-    temperature: 0,
     tools: [{
       type: 'function',
       function: {
@@ -322,6 +321,7 @@ const modelSchema = z.object({
   maxTokens: z.number().int().min(1).max(1000000).default(128000),
   enabled: z.boolean().default(true),
   supportsVision: z.boolean().default(false),
+  superAdminOnly: z.boolean().default(false),
   serviceId: z.string().uuid().optional(),
   allowedBusinessUnits: z.array(z.string()).optional(),
 });

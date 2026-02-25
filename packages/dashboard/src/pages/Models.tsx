@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2, Eye } from 'lucide-react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2, Eye, Shield } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
 
 interface SubModel {
@@ -28,6 +28,7 @@ interface Model {
   serviceId?: string;
   service?: { id: string; name: string; displayName: string };
   supportsVision: boolean;
+  superAdminOnly?: boolean;
   allowedBusinessUnits?: string[];
   subModels?: SubModel[];
 }
@@ -291,6 +292,12 @@ export default function Models({ serviceId }: ModelsProps) {
                             VL
                           </span>
                         )}
+                        {model.superAdminOnly && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-700" title="슈퍼 관리자 전용">
+                            <Shield className="w-3 h-3" />
+                            관리자
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-500">{model.name}</p>
                     </div>
@@ -529,6 +536,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     maxTokens: model?.maxTokens || 128000,
     enabled: model?.enabled ?? true,
     supportsVision: model?.supportsVision ?? false,
+    superAdminOnly: model?.superAdminOnly ?? false,
     serviceId: model?.serviceId || serviceId || '',
     allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
   });
@@ -845,6 +853,19 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
               <label htmlFor="supportsVision" className="text-sm text-gray-700 flex items-center gap-1">
                 <Eye className="w-3.5 h-3.5 text-emerald-600" />
                 Vision (VL) 지원
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="superAdminOnly"
+                checked={formData.superAdminOnly}
+                onChange={(e) => setFormData({ ...formData, superAdminOnly: e.target.checked })}
+                className="w-4 h-4 text-red-600 rounded focus:ring-red-600"
+              />
+              <label htmlFor="superAdminOnly" className="text-sm text-gray-700 flex items-center gap-1">
+                <Shield className="w-3.5 h-3.5 text-red-600" />
+                슈퍼 관리자 전용
               </label>
             </div>
           </div>
