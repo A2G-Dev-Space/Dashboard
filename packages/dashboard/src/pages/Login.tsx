@@ -15,7 +15,23 @@ interface LoginProps {
 
 // SSO 설정 (환경변수로 오버라이드 가능)
 const SSO_BASE_URL = import.meta.env.VITE_SSO_URL || 'https://genai.samsungds.net:36810';
+const SSO_FALLBACK_URL = 'https://12.81.222.41:36810';
 const SSO_PATH = '/direct_sso';
+
+/**
+ * SSO 호스트 도달 가능 여부 확인 (도메인 실패 시 fallback IP 사용)
+ */
+async function resolveSSO(): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    await fetch(SSO_BASE_URL, { signal: controller.signal, mode: 'no-cors' });
+    clearTimeout(timeoutId);
+    return SSO_BASE_URL;
+  } catch {
+    return SSO_FALLBACK_URL;
+  }
+}
 
 export default function Login({ onLogin }: LoginProps) {
   const [error, setError] = useState('');
@@ -75,19 +91,27 @@ export default function Login({ onLogin }: LoginProps) {
   };
 
   // SSO 로그인 시작
-  const handleSSOLogin = () => {
+  const handleSSOLogin = async () => {
     setLoading(true);
     setError('');
 
-    // Build redirect URL (current page)
-    const redirectUrl = window.location.origin + window.location.pathname;
+    try {
+      // SSO 호스트 도달 가능 여부 확인 (도메인 실패 시 fallback IP)
+      const ssoBase = await resolveSSO();
 
-    // Build SSO URL
-    const ssoUrl = new URL(SSO_PATH, SSO_BASE_URL);
-    ssoUrl.searchParams.set('redirect_url', redirectUrl);
+      // Build redirect URL (current page)
+      const redirectUrl = window.location.origin + window.location.pathname;
 
-    // Redirect to SSO
-    window.location.href = ssoUrl.toString();
+      // Build SSO URL
+      const ssoUrl = new URL(SSO_PATH, ssoBase);
+      ssoUrl.searchParams.set('redirect_url', redirectUrl);
+
+      // Redirect to SSO
+      window.location.href = ssoUrl.toString();
+    } catch {
+      setError('SSO 서버에 연결할 수 없습니다.');
+      setLoading(false);
+    }
   };
 
   // 로딩 중 (SSO 콜백 처리)
