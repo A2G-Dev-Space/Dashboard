@@ -31,7 +31,6 @@ import { holidaysRoutes } from './routes/holidays.routes.js';
 import { llmTestRoutes } from './routes/llm-test.routes.js';
 import { startLLMTestScheduler, stopLLMTestScheduler } from './services/llm-test.service.js';
 import { errorTelemetryRoutes } from './routes/error-telemetry.routes.js';
-import { firebaseAuthRoutes } from './routes/firebase-auth.routes.js';
 import { startErrorCleanupScheduler } from './services/error-cleanup.service.js';
 import { requestLogger } from './middleware/requestLogger.js';
 
@@ -76,7 +75,6 @@ app.get('/health', (_req, res) => {
 
 // API Routes
 app.use('/auth', authRoutes);
-app.use('/auth', firebaseAuthRoutes);  // 모바일 앱(에이아이) Firebase 인증
 app.use('/services', serviceRoutes);
 app.use('/models', modelsRoutes);
 app.use('/usage', usageRoutes);
