@@ -101,8 +101,8 @@ errorTelemetryRoutes.post(
       }
 
       // source 유효성 검증
-      if (!['cli', 'electron'].includes(source)) {
-        res.status(400).json({ error: 'source must be "cli" or "electron"' });
+      if (!['cli', 'electron', 'android'].includes(source)) {
+        res.status(400).json({ error: 'source must be "cli", "electron", or "android"' });
         return;
       }
 
