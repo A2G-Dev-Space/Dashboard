@@ -48,7 +48,7 @@ services:
       - default
       - dashboard_default
 
-  # Docs Site Dev Server (VitePress hot-reload)
+  # Docs Site Dev Server (React Vite hot-reload)
   docs-dev:
     build:
       context: ./docs-site
@@ -61,8 +61,9 @@ services:
       <<: *proxy-env
     volumes:
       # 소스 마운트 (hot-reload)
-      - ./docs-site/docs:/app/docs
-      - ./docs-site/.vitepress:/app/.vitepress
+      - ./docs-site/src:/app/src
+      - ./docs-site/public:/app/public
+      - ./docs-site/index.html:/app/index.html
     ports:
       - "${DOCS_DEV_PORT:-4094}:5173"
     networks:

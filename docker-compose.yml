@@ -122,8 +122,8 @@ services:
       <<: *timezone
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # VitePress 빌드 결과물 (docs-site/.vitepress/dist)
-      - ./docs-site/.vitepress/dist:/var/www/docs:ro
+      # React docs-site 빌드 결과물
+      - ./docs-site/dist:/var/www/docs:ro
     ports:
       - "${PROXY_PORT:-4090}:4090"
     depends_on:
