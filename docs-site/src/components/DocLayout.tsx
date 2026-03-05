@@ -29,11 +29,17 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
       .then((text) => {
         // Strip VitePress frontmatter
         const cleaned = text.replace(/^---[\s\S]*?---\n*/m, '');
-        // Convert ::: tip/warning/danger blocks to HTML
+        // Convert ::: tip/warning/danger blocks to blockquotes
         const processed = cleaned
-          .replace(/::: (tip|warning|danger|info)(.*)\n([\s\S]*?):::/g, (_m, type, _title, body) =>
-            `<div class="custom-block ${type}">${body.trim()}</div>`
-          );
+          .replace(/::: (tip|warning|danger|info)(.*)\n([\s\S]*?):::/g, (_m, type, title, body) => {
+            const icons: Record<string, string> = { tip: '💡', warning: '⚠️', danger: '🚨', info: 'ℹ️' };
+            const icon = icons[type] || 'ℹ️';
+            const heading = (title || '').trim();
+            const lines = body.trim().split('\n').map((l: string) => `> ${l}`).join('\n');
+            return heading
+              ? `> ${icon} **${heading}**\n>\n${lines}\n`
+              : `> ${icon}\n>\n${lines}\n`;
+          });
         setContent(processed);
         setLoading(false);
       })

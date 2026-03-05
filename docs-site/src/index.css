@@ -130,9 +130,3 @@ body {
 .prose img { border-radius: 0.75rem; margin: 1.5rem 0; }
 .prose hr { border-color: #e2e8f0; margin: 2rem 0; }
 
-/* Custom container styles (from VitePress ::: tip, ::: warning, ::: danger) */
-.custom-block { padding: 1rem 1.25rem; border-radius: 0.75rem; margin-bottom: 1.5rem; }
-.custom-block.tip { background: #eff6ff; border-left: 4px solid #5BA4D9; }
-.custom-block.warning { background: #fffbeb; border-left: 4px solid #f59e0b; }
-.custom-block.danger { background: #fef2f2; border-left: 4px solid #ef4444; }
-.custom-block.info { background: #f0f9ff; border-left: 4px solid #0ea5e9; }

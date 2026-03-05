@@ -8,9 +8,7 @@ export default function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-accent flex items-center justify-center">
-                <span className="text-white font-bold text-xs">N</span>
-              </div>
+              <img src="/docs/images/logo.png" alt="Nexus" className="w-8 h-8 rounded-lg" />
               <span className="text-white font-bold">Nexus Coder</span>
             </div>
             <p className="text-sm text-gray-500 leading-relaxed">
