@@ -2,9 +2,9 @@
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#60a5fa"/>
-      <stop offset="100%" style="stop-color:#1d4ed8"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="14" fill="#0f172a"/>
-  <text x="32" y="42" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="28" fill="url(#g)">&gt;_</text>
+  <rect width="64" height="64" rx="14" fill="#ffffff"/>
+  <text x="32" y="44" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="30" fill="url(#g)">&gt;_</text>
 </svg>
