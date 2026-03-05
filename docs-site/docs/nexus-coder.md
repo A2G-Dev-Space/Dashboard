@@ -63,11 +63,11 @@ source ~/.bashrc
 
 # 1. 다운로드
 mkdir -p ~/nexus-download && cd ~/nexus-download
-wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-4.4.0.gz
+wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-5.0.2.gz
 wget http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 
 # 2. 압축 해제 및 실행
-gunzip nexus-4.4.0.gz && mv nexus-4.4.0 nexus && chmod +x nexus
+gunzip nexus-5.0.2.gz && mv nexus-5.0.2 nexus && chmod +x nexus
 ./nexus
 
 # 3. 셸 리로드 후 어디서든 실행
