@@ -31,6 +31,31 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
         const cleaned = text.replace(/^---[\s\S]*?---\n*/m, '');
         // Convert ::: tip/warning/danger blocks to blockquotes
         const processed = cleaned
+          .replace(/::: details(.*)\n([\s\S]*?):::/g, (_m, title, body) => {
+            const summary = (title || '').trim() || '상세 보기';
+            // Convert markdown inside details to HTML since ReactMarkdown doesn't parse md inside raw HTML
+            let html = body.trim()
+              // Tables: convert markdown table to HTML table
+              .replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, (_tm: string, header: string, rows: string) => {
+                const ths = header.split('|').filter((c: string) => c.trim()).map((c: string) => `<th>${c.trim()}</th>`).join('');
+                const trs = rows.trim().split('\n').map((row: string) => {
+                  const tds = row.split('|').filter((c: string) => c.trim()).map((c: string) => `<td>${c.trim()}</td>`).join('');
+                  return `<tr>${tds}</tr>`;
+                }).join('');
+                return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+              })
+              // Bold
+              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+              // Inline code
+              .replace(/`([^`]+)`/g, '<code>$1</code>')
+              // Links
+              .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+              // List items
+              .replace(/^- (.+)$/gm, '<li>$1</li>')
+              // Wrap consecutive <li> in <ul>
+              .replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+            return `<details>\n<summary>${summary}</summary>\n${html}\n</details>\n`;
+          })
           .replace(/::: (tip|warning|danger|info)(.*)\n([\s\S]*?):::/g, (_m, type, title, body) => {
             const icons: Record<string, string> = { tip: '💡', warning: '⚠️', danger: '🚨', info: 'ℹ️' };
             const icon = icons[type] || 'ℹ️';

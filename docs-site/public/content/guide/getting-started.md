@@ -22,7 +22,7 @@ source ~/.bashrc   # 또는 source ~/.zshrc
 이 설정이 없으면 API 호출 시 연결 오류가 발생할 수 있습니다.
 :::
 
-::: details VWP / 해외연 사용자 방화벽 설정
+::: info VWP / 해외연 사용자 방화벽 설정
 VWP 또는 해외연 환경에서는 아래 방화벽을 해제해야 Nexus Coder를 사용할 수 있습니다.
 
 | 서버 IP | 포트 |
