@@ -2,12 +2,6 @@
 
 Nexus Coder를 시작하는 방법을 안내합니다.
 
-::: danger 지원 환경
-**PowerShell 및 VWP(Windows)는 지원되지 않습니다.**
-
-Linux 또는 WSL(Windows Subsystem for Linux) 환경에서 사용해주세요.
-:::
-
 ::: danger 필수: NO_PROXY 설정
 Nexus Coder가 정상적으로 동작하려면 다음 주소들에 대한 **NO_PROXY 설정이 반드시 필요**합니다:
 

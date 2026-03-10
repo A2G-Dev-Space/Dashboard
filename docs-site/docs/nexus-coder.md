@@ -49,7 +49,6 @@ features:
 ## 빠른 시작
 
 ::: warning 필수 환경
-- **Linux 또는 WSL 환경에서만 동작합니다** (PowerShell/VWP 미지원)
 - NO_PROXY 설정 필수: `export NO_PROXY="10.229.95.228,10.229.95.220,a2g.samsungds.net,genai.samsungds.net,$NO_PROXY"`
 :::
 
