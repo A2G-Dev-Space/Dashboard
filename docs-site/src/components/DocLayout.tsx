@@ -24,7 +24,7 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/docs/content/${contentPath}`)
+    fetch(`/docs/content/${contentPath}?t=${Date.now()}`)
       .then((r) => r.ok ? r.text() : '# 페이지를 찾을 수 없습니다')
       .then((text) => {
         // Strip VitePress frontmatter
