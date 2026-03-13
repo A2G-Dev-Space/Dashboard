@@ -30,6 +30,7 @@ interface Model {
   supportsVision: boolean;
   superAdminOnly?: boolean;
   agentDashboardEnabled?: boolean;
+  agentDashboardServiceId?: string | null;
   allowedBusinessUnits?: string[];
   subModels?: SubModel[];
 }
@@ -511,7 +512,7 @@ export default function Models({ serviceId }: ModelsProps) {
           modelId={editingSubModel.modelId}
           parentModelName={models.find(m => m.id === editingSubModel.modelId)?.name || ''}
           parentAgentDashboardEnabled={models.find(m => m.id === editingSubModel.modelId)?.agentDashboardEnabled}
-          parentServiceId={models.find(m => m.id === editingSubModel.modelId)?.serviceId}
+          parentAgentDashboardServiceId={models.find(m => m.id === editingSubModel.modelId)?.agentDashboardServiceId ?? undefined}
           subModel={editingSubModel.subModel}
           onClose={() => {
             setShowSubModelModal(false);
@@ -547,6 +548,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     supportsVision: model?.supportsVision ?? false,
     superAdminOnly: model?.superAdminOnly ?? false,
     agentDashboardEnabled: model?.agentDashboardEnabled ?? false,
+    agentDashboardServiceId: model?.agentDashboardServiceId || '',
     serviceId: model?.serviceId || serviceId || '',
     allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
   });
@@ -609,7 +611,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
         apiKey: formData.apiKey || undefined,
         extraHeaders: parseExtraHeaders(),
         agentDashboardEnabled: formData.agentDashboardEnabled || undefined,
-        serviceId: formData.agentDashboardEnabled ? (formData.serviceId || undefined) : undefined,
+        agentDashboardServiceId: formData.agentDashboardEnabled ? (formData.agentDashboardServiceId || undefined) : undefined,
       });
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);
@@ -900,6 +902,21 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
               </span>
             )}
           </div>
+          {formData.agentDashboardEnabled && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Agent Dashboard Service ID
+              </label>
+              <input
+                type="text"
+                value={formData.agentDashboardServiceId}
+                onChange={(e) => setFormData({ ...formData, agentDashboardServiceId: e.target.value })}
+                placeholder="e.g. nexus-coder"
+                className="w-full px-3 py-2 border rounded-md text-sm"
+              />
+              <p className="text-xs text-gray-500 mt-1">x-service-id 헤더에 전달할 서비스명</p>
+            </div>
+          )}
 
           {/* 사업부 제한 */}
           <div>
@@ -993,13 +1010,13 @@ interface SubModelModalProps {
   modelId: string;
   parentModelName: string;
   parentAgentDashboardEnabled?: boolean;
-  parentServiceId?: string;
+  parentAgentDashboardServiceId?: string;
   subModel: SubModel | null;
   onClose: () => void;
   onSave: () => void;
 }
 
-function SubModelModal({ modelId, parentModelName, parentAgentDashboardEnabled, parentServiceId, subModel, onClose, onSave }: SubModelModalProps) {
+function SubModelModal({ modelId, parentModelName, parentAgentDashboardEnabled, parentAgentDashboardServiceId, subModel, onClose, onSave }: SubModelModalProps) {
   const [formData, setFormData] = useState({
     modelName: subModel?.modelName || '',
     endpointUrl: subModel?.endpointUrl || '',
@@ -1052,7 +1069,7 @@ function SubModelModal({ modelId, parentModelName, parentAgentDashboardEnabled, 
         apiKey: formData.apiKey || undefined,
         extraHeaders: parseExtraHeaders(),
         agentDashboardEnabled: parentAgentDashboardEnabled || undefined,
-        serviceId: parentAgentDashboardEnabled ? (parentServiceId || undefined) : undefined,
+        agentDashboardServiceId: parentAgentDashboardEnabled ? (parentAgentDashboardServiceId || undefined) : undefined,
       });
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);

@@ -104,7 +104,8 @@ model Model {
   supportsVision Boolean @default(false) @map("supports_vision")
 
   // Agent Dashboard 정책 적용 (true면 호출 시 Agent Dashboard로 헤더 전달)
-  agentDashboardEnabled Boolean @default(false) @map("agent_dashboard_enabled")
+  agentDashboardEnabled   Boolean @default(false) @map("agent_dashboard_enabled")
+  agentDashboardServiceId String? @map("agent_dashboard_service_id") // x-service-id 헤더에 보낼 서비스명 (e.g. "nexus-coder")
 
   // 서비스 연결 (nullable for migration, then required)
   serviceId   String?  @map("service_id")

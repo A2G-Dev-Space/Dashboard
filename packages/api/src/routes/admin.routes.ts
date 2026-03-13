@@ -31,15 +31,6 @@ function getServiceFilter(serviceId: string | undefined) {
   return serviceId ? { serviceId } : {};
 }
 
-/**
- * Helper: serviceId(UUID)로 서비스 name 조회
- */
-async function resolveServiceName(serviceId: string | undefined | null): Promise<string | undefined> {
-  if (!serviceId) return undefined;
-  const svc = await prisma.service.findUnique({ where: { id: serviceId }, select: { name: true } });
-  return svc?.name ?? undefined;
-}
-
 export const adminRoutes = Router();
 
 // Apply authentication and admin check to all routes
@@ -343,6 +334,7 @@ const modelSchema = z.object({
   supportsVision: z.boolean().default(false),
   superAdminOnly: z.boolean().default(false),
   agentDashboardEnabled: z.boolean().default(false),
+  agentDashboardServiceId: z.string().max(100).optional().nullable(),
   serviceId: z.string().uuid().optional(),
   allowedBusinessUnits: z.array(z.string()).optional(),
 });
@@ -449,8 +441,7 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
     // Health check: 엔드포인트 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const svcName = validation.data.agentDashboardEnabled ? await resolveServiceName(validation.data.serviceId) : undefined;
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey, validation.data.extraHeaders, validation.data.agentDashboardEnabled, svcName);
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey, validation.data.extraHeaders, validation.data.agentDashboardEnabled, validation.data.agentDashboardServiceId ?? undefined);
       console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -571,7 +562,7 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
     // Health check: endpointUrl, apiKey, name, extraHeaders 중 실제로 변경된 경우만 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const existing = await prisma.model.findUnique({ where: { id }, select: { endpointUrl: true, apiKey: true, name: true, extraHeaders: true, agentDashboardEnabled: true, serviceId: true } });
+      const existing = await prisma.model.findUnique({ where: { id }, select: { endpointUrl: true, apiKey: true, name: true, extraHeaders: true, agentDashboardEnabled: true, agentDashboardServiceId: true, serviceId: true } });
       if (existing) {
         const endpointChanged = validation.data.endpointUrl !== undefined && validation.data.endpointUrl !== existing.endpointUrl;
         const apiKeyChanged = validation.data.apiKey !== undefined && validation.data.apiKey !== (existing.apiKey || undefined);
@@ -585,8 +576,8 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
           const modelName = validation.data.name || existing.name;
           const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
           const adEnabled = validation.data.agentDashboardEnabled ?? existing.agentDashboardEnabled;
-          const svcName = adEnabled ? await resolveServiceName(validation.data.serviceId ?? existing.serviceId) : undefined;
-          const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, adEnabled, svcName);
+          const adSvcId = validation.data.agentDashboardServiceId ?? existing.agentDashboardServiceId ?? undefined;
+          const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, adEnabled, adSvcId);
           console.log(`[HealthCheck] Model "${modelName}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
           if (!healthResult.healthy) {
@@ -739,7 +730,7 @@ adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest
 
     const model = await prisma.model.findUnique({
       where: { id: modelId },
-      select: { id: true, name: true, serviceId: true, agentDashboardEnabled: true },
+      select: { id: true, name: true, serviceId: true, agentDashboardEnabled: true, agentDashboardServiceId: true },
     });
 
     if (!model) {
@@ -766,8 +757,7 @@ adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
       const healthCheckModelName = validation.data.modelName || model.name;
-      const svcName = model.agentDashboardEnabled ? await resolveServiceName(model.serviceId) : undefined;
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey, validation.data.extraHeaders, model.agentDashboardEnabled, svcName);
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey, validation.data.extraHeaders, model.agentDashboardEnabled, model.agentDashboardServiceId ?? undefined);
       console.log(`[HealthCheck] SubModel for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -813,7 +803,7 @@ adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: Authentic
 
     const model = await prisma.model.findUnique({
       where: { id: modelId },
-      select: { id: true, name: true, serviceId: true, agentDashboardEnabled: true },
+      select: { id: true, name: true, serviceId: true, agentDashboardEnabled: true, agentDashboardServiceId: true },
     });
 
     if (!model) {
@@ -856,8 +846,7 @@ adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: Authentic
         const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
         const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
         const healthCheckModelName = validation.data.modelName || existing.modelName || model.name;
-        const svcName = model.agentDashboardEnabled ? await resolveServiceName(model.serviceId) : undefined;
-        const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey, extraHeaders, model.agentDashboardEnabled, svcName);
+        const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey, extraHeaders, model.agentDashboardEnabled, model.agentDashboardServiceId ?? undefined);
         console.log(`[HealthCheck] SubModel update for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
         if (!healthResult.healthy) {
@@ -947,7 +936,7 @@ adminRoutes.post('/models/test', async (req: AuthenticatedRequest, res) => {
       apiKey: z.string().optional(),
       extraHeaders: z.record(z.string()).optional(),
       agentDashboardEnabled: z.boolean().optional(),
-      serviceId: z.string().optional(),
+      agentDashboardServiceId: z.string().optional(),
     });
 
     const validation = testSchema.safeParse(req.body);
@@ -956,9 +945,8 @@ adminRoutes.post('/models/test', async (req: AuthenticatedRequest, res) => {
       return;
     }
 
-    const { endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, serviceId } = validation.data;
-    const svcName = agentDashboardEnabled ? await resolveServiceName(serviceId) : undefined;
-    const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, svcName);
+    const { endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, agentDashboardServiceId } = validation.data;
+    const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, agentDashboardServiceId);
     console.log(`[Test] Model "${modelName}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
     res.json({ healthCheck: healthResult });
