@@ -169,7 +169,7 @@ async function main() {
     await seedHolidays(prisma);
 
     const server = app.listen(PORT, () => {
-      console.log(`AX Portal API server running on port ${PORT}`);
+      console.log(`Syngha's Portal API server running on port ${PORT}`);
     });
     // Must be > nginx keepalive_timeout (60s) to prevent "connection reset by peer"
     server.keepAliveTimeout = 65000;
