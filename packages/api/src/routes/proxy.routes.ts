@@ -39,8 +39,7 @@ proxyRoutes.use((req, _res, next) => {
   const model = req.body?.model || '-';
   console.log(
     `[Proxy] ──── ${req.method} ${req.path} ────\n` +
-    `  👤 ID: ${userId} | 이름: ${userName} | 부서: ${userDept} | 서비스: ${serviceId}\n` +
-    `  🤖 모델: ${model}\n` +
+    `  👤 ID: ${userId} | 이름: ${userName} | 부서: ${userDept} | 서비스: ${serviceId} | 모델: ${model}\n` +
     `  Headers:\n${otherLines.join('\n')}`
   );
   next();
