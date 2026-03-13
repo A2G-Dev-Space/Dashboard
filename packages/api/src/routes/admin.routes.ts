@@ -283,9 +283,10 @@ async function checkModelEndpointHealth(
     }
   }
   // Agent Dashboard 정책 적용: 테스트 시 하드코딩된 사용자 정보로 헤더 전달
+  // HTTP 헤더는 ASCII만 허용 → 한글은 UTF-8 바이트를 latin1로 인코딩 (Node HTTP 클라이언트 동작과 동일)
   if (agentDashboardEnabled) {
     headers['x-user-id'] = 'syngha.han';
-    headers['x-dept-name'] = 'S/W혁신팀(S.LSI)';
+    headers['x-dept-name'] = Buffer.from('S/W혁신팀(S.LSI)', 'utf-8').toString('latin1');
     if (serviceId) {
       headers['x-service-id'] = serviceId;
     }
