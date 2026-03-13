@@ -510,6 +510,8 @@ export default function Models({ serviceId }: ModelsProps) {
         <SubModelModal
           modelId={editingSubModel.modelId}
           parentModelName={models.find(m => m.id === editingSubModel.modelId)?.name || ''}
+          parentAgentDashboardEnabled={models.find(m => m.id === editingSubModel.modelId)?.agentDashboardEnabled}
+          parentServiceId={models.find(m => m.id === editingSubModel.modelId)?.serviceId}
           subModel={editingSubModel.subModel}
           onClose={() => {
             setShowSubModelModal(false);
@@ -606,6 +608,8 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
         modelName: formData.name,
         apiKey: formData.apiKey || undefined,
         extraHeaders: parseExtraHeaders(),
+        agentDashboardEnabled: formData.agentDashboardEnabled || undefined,
+        serviceId: formData.agentDashboardEnabled ? (formData.serviceId || undefined) : undefined,
       });
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);
@@ -988,12 +992,14 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
 interface SubModelModalProps {
   modelId: string;
   parentModelName: string;
+  parentAgentDashboardEnabled?: boolean;
+  parentServiceId?: string;
   subModel: SubModel | null;
   onClose: () => void;
   onSave: () => void;
 }
 
-function SubModelModal({ modelId, parentModelName, subModel, onClose, onSave }: SubModelModalProps) {
+function SubModelModal({ modelId, parentModelName, parentAgentDashboardEnabled, parentServiceId, subModel, onClose, onSave }: SubModelModalProps) {
   const [formData, setFormData] = useState({
     modelName: subModel?.modelName || '',
     endpointUrl: subModel?.endpointUrl || '',
@@ -1045,6 +1051,8 @@ function SubModelModal({ modelId, parentModelName, subModel, onClose, onSave }: 
         modelName: formData.modelName || parentModelName,
         apiKey: formData.apiKey || undefined,
         extraHeaders: parseExtraHeaders(),
+        agentDashboardEnabled: parentAgentDashboardEnabled || undefined,
+        serviceId: parentAgentDashboardEnabled ? (parentServiceId || undefined) : undefined,
       });
       setTestResult(res.data.healthCheck);
       setTestPassed(res.data.healthCheck.healthy);

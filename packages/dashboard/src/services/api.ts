@@ -71,7 +71,7 @@ export const modelsApi = {
   deleteSubModel: (modelId: string, subModelId: string) =>
     api.delete(`/admin/models/${modelId}/sub-models/${subModelId}`),
   // 엔드포인트 테스트 (call test + tool call test)
-  testEndpoint: (data: { endpointUrl: string; modelName: string; apiKey?: string; extraHeaders?: Record<string, string> }) =>
+  testEndpoint: (data: { endpointUrl: string; modelName: string; apiKey?: string; extraHeaders?: Record<string, string>; agentDashboardEnabled?: boolean; serviceId?: string }) =>
     api.post('/admin/models/test', data),
 };
 
