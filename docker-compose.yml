@@ -1,11 +1,9 @@
-version: '3.8'
-
 # ============================================
 # AI Services Dashboard - Docker Compose
 # ============================================
 # Blue-Green 무중단 배포 지원
 # 배포: ./deploy.sh (권장)
-# 수동: docker compose --profile blue up -d
+# 수동: docker compose up -d api-blue dashboard-blue
 
 # 타임존 설정 (KST)
 x-timezone: &timezone
@@ -51,6 +49,12 @@ x-api-common: &api-common
       condition: service_healthy
     redis:
       condition: service_healthy
+  healthcheck:
+    test: ["CMD", "node", "-e", "const h=require('http');h.get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+    interval: 10s
+    timeout: 3s
+    start_period: 30s
+    retries: 3
 
 # Dashboard 공통 설정
 x-dashboard-common: &dashboard-common
@@ -110,6 +114,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # ============================================
+  # Blue-Green: API Server
+  # ============================================
+  api-blue:
+    <<: *api-common
+    container_name: dashboard-api-blue
+
+  api-green:
+    <<: *api-common
+    container_name: dashboard-api-green
+
+  # ============================================
+  # Blue-Green: React Dashboard
+  # ============================================
+  dashboard-blue:
+    <<: *dashboard-common
+    container_name: dashboard-frontend-blue
+
+  dashboard-green:
+    <<: *dashboard-common
+    container_name: dashboard-frontend-green
+
   # Nginx Reverse Proxy (upstream은 deploy.sh가 동적 전환)
   nginx:
     image: nginx:alpine
@@ -117,52 +143,21 @@ services:
     restart: unless-stopped
     environment:
       <<: *timezone
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "[nginx] Waiting for upstream..."
-        for i in $$(seq 1 120); do
-          if wget -q --spider --timeout=2 http://api-blue:3000/health 2>/dev/null || \
-             wget -q --spider --timeout=2 http://api-green:3000/health 2>/dev/null; then
-            echo "[nginx] Upstream ready!"
-            break
-          fi
-          [ $$((i % 10)) -eq 0 ] && echo "[nginx] Still waiting... ($${i}s)"
-          sleep 1
-        done
-        exec nginx -g 'daemon off;'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/upstream.conf:/etc/nginx/conf.d/upstream.conf:ro
       - ./docs-site/dist:/var/www/docs:ro
     ports:
       - "${PROXY_PORT:-4090}:4090"
-
-  # ============================================
-  # Blue Deployment
-  # ============================================
-  api-blue:
-    <<: *api-common
-    container_name: dashboard-api-blue
-    profiles: ["blue"]
-
-  dashboard-blue:
-    <<: *dashboard-common
-    container_name: dashboard-frontend-blue
-    profiles: ["blue"]
-
-  # ============================================
-  # Green Deployment
-  # ============================================
-  api-green:
-    <<: *api-common
-    container_name: dashboard-api-green
-    profiles: ["green"]
-
-  dashboard-green:
-    <<: *dashboard-common
-    container_name: dashboard-frontend-green
-    profiles: ["green"]
+    depends_on:
+      api-blue:
+        condition: service_healthy
+      api-green:
+        condition: service_healthy
+      dashboard-blue:
+        condition: service_started
+      dashboard-green:
+        condition: service_started
 
 volumes:
   postgres_data:
