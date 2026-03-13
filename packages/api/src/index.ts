@@ -32,6 +32,7 @@ import { llmTestRoutes } from './routes/llm-test.routes.js';
 import { startLLMTestScheduler, stopLLMTestScheduler } from './services/llm-test.service.js';
 import { errorTelemetryRoutes } from './routes/error-telemetry.routes.js';
 import { startErrorCleanupScheduler } from './services/error-cleanup.service.js';
+import { seedHolidays } from './services/holiday-seed.service.js';
 import { requestLogger } from './middleware/requestLogger.js';
 
 // Load environment variables
@@ -163,6 +164,9 @@ async function main() {
 
     // Ensure default service exists
     await ensureDefaultService();
+
+    // Seed 2026 holidays (idempotent)
+    await seedHolidays(prisma);
 
     const server = app.listen(PORT, () => {
       console.log(`AX Portal API server running on port ${PORT}`);
