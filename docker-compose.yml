@@ -3,8 +3,9 @@ version: '3.8'
 # ============================================
 # AI Services Dashboard - Docker Compose
 # ============================================
-# 환경 변수는 .env 파일에서 설정합니다
-# cp .env.example .env
+# Blue-Green 무중단 배포 지원
+# 배포: ./deploy.sh (권장)
+# 수동: docker compose --profile blue up -d
 
 # 타임존 설정 (KST)
 x-timezone: &timezone
@@ -15,13 +16,61 @@ x-proxy-env: &proxy-env
   <<: *timezone
   HTTP_PROXY: "${HTTP_PROXY:-}"
   HTTPS_PROXY: "${HTTPS_PROXY:-}"
-  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api-blue,api-green,dashboard-blue,dashboard-green,nginx}"
   http_proxy: "${HTTP_PROXY:-}"
   https_proxy: "${HTTPS_PROXY:-}"
-  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api,dashboard,nginx}"
+  no_proxy: "${NO_PROXY:-localhost,127.0.0.1,.samsungds.net,postgres,redis,api-blue,api-green,dashboard-blue,dashboard-green,nginx}"
   NODE_TLS_REJECT_UNAUTHORIZED: "${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
 
+# API 공통 설정
+x-api-common: &api-common
+  build:
+    context: ./packages/api
+    dockerfile: Dockerfile
+    args:
+      <<: *proxy-env
+  restart: unless-stopped
+  environment:
+    <<: *proxy-env
+    NODE_ENV: production
+    DATABASE_URL: postgresql://${POSTGRES_USER:-nexuscoder}:${POSTGRES_PASSWORD:-nexuscoder123}@postgres:5432/${POSTGRES_DB:-nexuscoder}?connection_limit=100&pool_timeout=30
+    REDIS_URL: redis://redis:6379
+    JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-change-in-production}
+    SSO_CERT_PATH: /app/cert/cert.cer
+    DEVELOPERS: ${DEVELOPERS:-syngha.han}
+    PORT: ${API_PORT:-3000}
+    DEFAULT_SERVICE_ID: ${DEFAULT_SERVICE_ID:-nexus-coder}
+    DEFAULT_SERVICE_NAME: ${DEFAULT_SERVICE_NAME:-nexus-coder}
+    DEFAULT_SERVICE_DISPLAY_NAME: ${DEFAULT_SERVICE_DISPLAY_NAME:-Nexus Coder}
+  volumes:
+    - ./cert:/app/cert:ro
+  expose:
+    - "3000"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+# Dashboard 공통 설정
+x-dashboard-common: &dashboard-common
+  build:
+    context: ./packages/dashboard
+    dockerfile: Dockerfile
+    args:
+      <<: *proxy-env
+  restart: unless-stopped
+  environment:
+    <<: *proxy-env
+    VITE_API_URL: /api
+  expose:
+    - "80"
+
 services:
+  # ============================================
+  # Base Services (항상 실행)
+  # ============================================
+
   # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
@@ -61,74 +110,59 @@ services:
       timeout: 5s
       retries: 5
 
-  # API Server (internal only, accessed via Nginx)
-  api:
-    build:
-      context: ./packages/api
-      dockerfile: Dockerfile
-      args:
-        <<: *proxy-env
-    container_name: dashboard-api
-    restart: unless-stopped
-    environment:
-      <<: *proxy-env
-      NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-nexuscoder}:${POSTGRES_PASSWORD:-nexuscoder123}@postgres:5432/${POSTGRES_DB:-nexuscoder}?connection_limit=100&pool_timeout=30
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-your-jwt-secret-change-in-production}
-      SSO_CERT_PATH: /app/cert/cert.cer
-      # 개발자 목록 (쉼표로 구분, SUPER_ADMIN 권한)
-      DEVELOPERS: ${DEVELOPERS:-syngha.han}
-      PORT: ${API_PORT:-3000}
-      # 기본 서비스 설정
-      DEFAULT_SERVICE_ID: ${DEFAULT_SERVICE_ID:-nexus-coder}
-      DEFAULT_SERVICE_NAME: ${DEFAULT_SERVICE_NAME:-nexus-coder}
-      DEFAULT_SERVICE_DISPLAY_NAME: ${DEFAULT_SERVICE_DISPLAY_NAME:-Nexus Coder}
-    volumes:
-      - ./cert:/app/cert:ro
-    # No external port - accessed via Nginx only
-    expose:
-      - "3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # React Dashboard (internal only, accessed via Nginx)
-  dashboard:
-    build:
-      context: ./packages/dashboard
-      dockerfile: Dockerfile
-      args:
-        <<: *proxy-env
-    container_name: dashboard-frontend
-    restart: unless-stopped
-    environment:
-      <<: *proxy-env
-      VITE_API_URL: /api
-    # No external port - accessed via Nginx only
-    expose:
-      - "80"
-    depends_on:
-      - api
-
-  # Nginx Reverse Proxy
+  # Nginx Reverse Proxy (upstream은 deploy.sh가 동적 전환)
   nginx:
     image: nginx:alpine
     container_name: dashboard-proxy
     restart: unless-stopped
     environment:
       <<: *timezone
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "[nginx] Waiting for upstream..."
+        for i in $$(seq 1 120); do
+          if wget -q --spider --timeout=2 http://api-blue:3000/health 2>/dev/null || \
+             wget -q --spider --timeout=2 http://api-green:3000/health 2>/dev/null; then
+            echo "[nginx] Upstream ready!"
+            break
+          fi
+          [ $$((i % 10)) -eq 0 ] && echo "[nginx] Still waiting... ($${i}s)"
+          sleep 1
+        done
+        exec nginx -g 'daemon off;'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # React docs-site 빌드 결과물
+      - ./nginx/upstream.conf:/etc/nginx/conf.d/upstream.conf:ro
       - ./docs-site/dist:/var/www/docs:ro
     ports:
       - "${PROXY_PORT:-4090}:4090"
-    depends_on:
-      - api
-      - dashboard
+
+  # ============================================
+  # Blue Deployment
+  # ============================================
+  api-blue:
+    <<: *api-common
+    container_name: dashboard-api-blue
+    profiles: ["blue"]
+
+  dashboard-blue:
+    <<: *dashboard-common
+    container_name: dashboard-frontend-blue
+    profiles: ["blue"]
+
+  # ============================================
+  # Green Deployment
+  # ============================================
+  api-green:
+    <<: *api-common
+    container_name: dashboard-api-green
+    profiles: ["green"]
+
+  dashboard-green:
+    <<: *dashboard-common
+    container_name: dashboard-frontend-green
+    profiles: ["green"]
 
 volumes:
   postgres_data:
