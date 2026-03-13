@@ -322,6 +322,7 @@ const modelSchema = z.object({
   enabled: z.boolean().default(true),
   supportsVision: z.boolean().default(false),
   superAdminOnly: z.boolean().default(false),
+  agentDashboardEnabled: z.boolean().default(false),
   serviceId: z.string().uuid().optional(),
   allowedBusinessUnits: z.array(z.string()).optional(),
 });

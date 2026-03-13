@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2, Eye, Shield } from 'lucide-react';
+import { Plus, Edit2, Trash2, Server, Check, X, GripVertical, Layers, ChevronDown, ChevronRight, Play, CheckCircle, XCircle, Loader2, Eye, Shield, Building2 } from 'lucide-react';
 import { modelsApi, serviceApi } from '../services/api';
 
 interface SubModel {
@@ -29,6 +29,7 @@ interface Model {
   service?: { id: string; name: string; displayName: string };
   supportsVision: boolean;
   superAdminOnly?: boolean;
+  agentDashboardEnabled?: boolean;
   allowedBusinessUnits?: string[];
   subModels?: SubModel[];
 }
@@ -298,6 +299,12 @@ export default function Models({ serviceId }: ModelsProps) {
                             관리자
                           </span>
                         )}
+                        {model.agentDashboardEnabled && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-violet-100 text-violet-700" title="Agent Dashboard 정책 적용">
+                            <Building2 className="w-3 h-3" />
+                            정책
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-500">{model.name}</p>
                     </div>
@@ -537,6 +544,7 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     enabled: model?.enabled ?? true,
     supportsVision: model?.supportsVision ?? false,
     superAdminOnly: model?.superAdminOnly ?? false,
+    agentDashboardEnabled: model?.agentDashboardEnabled ?? false,
     serviceId: model?.serviceId || serviceId || '',
     allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
   });
@@ -868,6 +876,25 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
                 슈퍼 관리자 전용
               </label>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="agentDashboardEnabled"
+              checked={formData.agentDashboardEnabled}
+              onChange={(e) => setFormData({ ...formData, agentDashboardEnabled: e.target.checked })}
+              className="w-4 h-4 text-violet-600 rounded focus:ring-violet-600"
+            />
+            <label htmlFor="agentDashboardEnabled" className="text-sm text-gray-700 flex items-center gap-1">
+              <Building2 className="w-3.5 h-3.5 text-violet-600" />
+              Agent Dashboard 정책 적용
+            </label>
+            {formData.agentDashboardEnabled && (
+              <span className="text-xs text-gray-500 ml-2">
+                호출 시 서비스 헤더(x-service-id, x-user-id, x-dept-name)를 엔드포인트에 전달합니다
+              </span>
+            )}
           </div>
 
           {/* 사업부 제한 */}

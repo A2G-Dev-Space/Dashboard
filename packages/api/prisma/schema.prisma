@@ -103,6 +103,9 @@ model Model {
   // Vision Language Model 지원 여부
   supportsVision Boolean @default(false) @map("supports_vision")
 
+  // Agent Dashboard 정책 적용 (true면 호출 시 Agent Dashboard로 헤더 전달)
+  agentDashboardEnabled Boolean @default(false) @map("agent_dashboard_enabled")
+
   // 서비스 연결 (nullable for migration, then required)
   serviceId   String?  @map("service_id")
   service     Service? @relation(fields: [serviceId], references: [id])

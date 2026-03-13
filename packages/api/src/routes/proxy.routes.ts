@@ -500,6 +500,19 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
         }
       }
 
+      // Agent Dashboard 정책 적용: 원본 요청의 서비스/사용자 헤더를 LLM 엔드포인트로 전달
+      if (model.agentDashboardEnabled) {
+        const origServiceId = req.headers['x-service-id'] as string | undefined;
+        const origUserId = req.headers['x-user-id'] as string | undefined;
+        const origUserDept = req.headers['x-user-dept'] as string | undefined;
+        const origUserName = req.headers['x-user-name'] as string | undefined;
+
+        if (origServiceId) headers['x-service-id'] = origServiceId;
+        if (origUserId) headers['x-user-id'] = origUserId;
+        if (origUserDept) headers['x-dept-name'] = origUserDept;
+        if (origUserName) headers['x-user-name'] = origUserName;
+      }
+
       const effectiveModel = {
         ...model,
         endpointUrl: endpoint.endpointUrl,

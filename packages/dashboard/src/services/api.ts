@@ -185,6 +185,9 @@ interface CreateModelData {
   extraHeaders?: Record<string, string>;
   maxTokens?: number;
   enabled?: boolean;
+  supportsVision?: boolean;
+  superAdminOnly?: boolean;
+  agentDashboardEnabled?: boolean;
   serviceId?: string;
   allowedBusinessUnits?: string[];
 }
