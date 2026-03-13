@@ -121,7 +121,7 @@ export default function Layout({ children, user, isAdmin, adminRole, onLogout }:
       if (location.pathname.includes('/users')) return `${service?.displayName || ''} 사용자`;
       return `${service?.displayName || ''} 대시보드`;
     }
-    return 'Syngha's Portal';
+    return "Syngha's Portal";
   };
 
   // 역할 표시 텍스트

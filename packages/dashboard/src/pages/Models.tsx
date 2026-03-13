@@ -216,7 +216,7 @@ export default function Models({ serviceId }: ModelsProps) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Models</h1>
           <p className="text-gray-500 mt-1">
-            {serviceInfo ? `${serviceInfo.displayName}의 LLM 엔드포인트 관리` : 'Manage LLM endpoints for Syngha's Portal'}
+            {serviceInfo ? `${serviceInfo.displayName}의 LLM 엔드포인트 관리` : "Manage LLM endpoints for Syngha's Portal"}
           </p>
         </div>
         <button
