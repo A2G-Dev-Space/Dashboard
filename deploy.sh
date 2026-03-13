@@ -166,7 +166,7 @@ cmd_init() {
 
   # Blue 먼저 (DB 마이그레이션 실행)
   log "2/4 Blue 슬롯 빌드 + 시작"
-  docker compose build api-blue dashboard-blue
+  docker compose build --no-cache api-blue dashboard-blue
   docker compose up -d api-blue dashboard-blue
   wait_healthy api-blue 90
   wait_healthy dashboard-blue 30
@@ -174,7 +174,7 @@ cmd_init() {
 
   # Green (Blue가 마이그레이션 완료 후)
   log "3/4 Green 슬롯 빌드 + 시작"
-  docker compose build api-green dashboard-green
+  docker compose build --no-cache api-green dashboard-green
   docker compose up -d api-green dashboard-green
   wait_healthy api-green 90
   wait_healthy dashboard-green 30
@@ -196,7 +196,7 @@ upstream dashboard {
     server dashboard-blue:80;
 }
 CONF
-  docker compose up -d nginx
+  docker compose up -d --force-recreate nginx
   echo ""
 
   # 상태 저장
@@ -233,7 +233,7 @@ cmd_deploy() {
   # Step 1: 비활성 슬롯 빌드 (기존 서비스 계속 운영)
   # ──────────────────────────────────────────
   log "Step 1/5: ${INACTIVE} 슬롯 이미지 빌드 (서비스 중단 없음)"
-  docker compose build "api-${INACTIVE}" "dashboard-${INACTIVE}"
+  docker compose build --no-cache "api-${INACTIVE}" "dashboard-${INACTIVE}"
   echo ""
 
   # ──────────────────────────────────────────
@@ -268,7 +268,7 @@ cmd_deploy() {
   # Step 4: 구 활성 슬롯(이제 비활성) 업데이트
   # ──────────────────────────────────────────
   log "Step 4/5: ${ACTIVE} 슬롯 업데이트 (트래픽은 이미 ${INACTIVE}에서 처리 중)"
-  docker compose build "api-${ACTIVE}" "dashboard-${ACTIVE}"
+  docker compose build --no-cache "api-${ACTIVE}" "dashboard-${ACTIVE}"
   docker compose up -d "api-${ACTIVE}" "dashboard-${ACTIVE}"
 
   if ! wait_healthy "api-${ACTIVE}" 90; then
