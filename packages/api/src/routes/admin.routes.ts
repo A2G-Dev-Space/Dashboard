@@ -31,6 +31,15 @@ function getServiceFilter(serviceId: string | undefined) {
   return serviceId ? { serviceId } : {};
 }
 
+/**
+ * Helper: serviceId(UUID)로 서비스 name 조회
+ */
+async function resolveServiceName(serviceId: string | undefined | null): Promise<string | undefined> {
+  if (!serviceId) return undefined;
+  const svc = await prisma.service.findUnique({ where: { id: serviceId }, select: { name: true } });
+  return svc?.name ?? undefined;
+}
+
 export const adminRoutes = Router();
 
 // Apply authentication and admin check to all routes
@@ -264,7 +273,7 @@ async function checkModelEndpointHealth(
   apiKey?: string,
   extraHeaders?: Record<string, string>,
   agentDashboardEnabled?: boolean,
-  serviceId?: string
+  serviceName?: string
 ): Promise<HealthCheckResult> {
   const totalStart = Date.now();
   const url = buildHealthCheckUrl(endpointUrl);
@@ -287,8 +296,8 @@ async function checkModelEndpointHealth(
   if (agentDashboardEnabled) {
     headers['x-user-id'] = 'syngha.han';
     headers['x-dept-name'] = Buffer.from('S/W혁신팀(S.LSI)', 'utf-8').toString('latin1');
-    if (serviceId) {
-      headers['x-service-id'] = serviceId;
+    if (serviceName) {
+      headers['x-service-id'] = serviceName;
     }
   }
 
@@ -440,7 +449,8 @@ adminRoutes.post('/models', async (req: AuthenticatedRequest, res) => {
     // Health check: 엔드포인트 연결 확인
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey, validation.data.extraHeaders, validation.data.agentDashboardEnabled, validation.data.serviceId);
+      const svcName = validation.data.agentDashboardEnabled ? await resolveServiceName(validation.data.serviceId) : undefined;
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, validation.data.name, validation.data.apiKey, validation.data.extraHeaders, validation.data.agentDashboardEnabled, svcName);
       console.log(`[HealthCheck] Model "${validation.data.name}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -575,8 +585,8 @@ adminRoutes.put('/models/:id', async (req: AuthenticatedRequest, res) => {
           const modelName = validation.data.name || existing.name;
           const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
           const adEnabled = validation.data.agentDashboardEnabled ?? existing.agentDashboardEnabled;
-          const svcId = validation.data.serviceId ?? existing.serviceId ?? undefined;
-          const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, adEnabled, svcId);
+          const svcName = adEnabled ? await resolveServiceName(validation.data.serviceId ?? existing.serviceId) : undefined;
+          const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, adEnabled, svcName);
           console.log(`[HealthCheck] Model "${modelName}" update → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
           if (!healthResult.healthy) {
@@ -756,7 +766,8 @@ adminRoutes.post('/models/:modelId/sub-models', async (req: AuthenticatedRequest
     const skipHealthCheck = req.query['skipHealthCheck'] === 'true';
     if (!skipHealthCheck) {
       const healthCheckModelName = validation.data.modelName || model.name;
-      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey, validation.data.extraHeaders, model.agentDashboardEnabled, model.serviceId ?? undefined);
+      const svcName = model.agentDashboardEnabled ? await resolveServiceName(model.serviceId) : undefined;
+      const healthResult = await checkModelEndpointHealth(validation.data.endpointUrl, healthCheckModelName, validation.data.apiKey, validation.data.extraHeaders, model.agentDashboardEnabled, svcName);
       console.log(`[HealthCheck] SubModel for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
       if (!healthResult.healthy) {
@@ -845,7 +856,8 @@ adminRoutes.put('/models/:modelId/sub-models/:subModelId', async (req: Authentic
         const apiKey = validation.data.apiKey !== undefined ? validation.data.apiKey : (existing.apiKey || undefined);
         const extraHeaders = validation.data.extraHeaders !== undefined ? validation.data.extraHeaders : (existing.extraHeaders as Record<string, string> || undefined);
         const healthCheckModelName = validation.data.modelName || existing.modelName || model.name;
-        const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey, extraHeaders, model.agentDashboardEnabled, model.serviceId ?? undefined);
+        const svcName = model.agentDashboardEnabled ? await resolveServiceName(model.serviceId) : undefined;
+        const healthResult = await checkModelEndpointHealth(endpointUrl, healthCheckModelName, apiKey, extraHeaders, model.agentDashboardEnabled, svcName);
         console.log(`[HealthCheck] SubModel update for "${model.name}" (model=${healthCheckModelName}) → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
         if (!healthResult.healthy) {
@@ -945,7 +957,8 @@ adminRoutes.post('/models/test', async (req: AuthenticatedRequest, res) => {
     }
 
     const { endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, serviceId } = validation.data;
-    const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, serviceId);
+    const svcName = agentDashboardEnabled ? await resolveServiceName(serviceId) : undefined;
+    const healthResult = await checkModelEndpointHealth(endpointUrl, modelName, apiKey, extraHeaders, agentDashboardEnabled, svcName);
     console.log(`[Test] Model "${modelName}" → ${healthResult.healthy ? 'OK' : 'FAIL'} (${healthResult.totalLatencyMs}ms) ${healthResult.message}`);
 
     res.json({ healthCheck: healthResult });

@@ -404,6 +404,7 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     let model = serviceId
       ? await prisma.model.findFirst({
           where: { name: modelName, serviceId, enabled: true },
+          include: { service: { select: { name: true } } },
         })
       : null;
 
@@ -417,6 +418,7 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
           ],
           enabled: true,
         },
+        include: { service: { select: { name: true } } },
       });
     }
 
@@ -500,14 +502,14 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
         }
       }
 
-      // Agent Dashboard 정책 적용: 원본 요청의 서비스/사용자 헤더를 LLM 엔드포인트로 전달
+      // Agent Dashboard 정책 적용: 서비스 name + 원본 요청의 사용자 헤더를 LLM 엔드포인트로 전달
       if (model.agentDashboardEnabled) {
-        const origServiceId = req.headers['x-service-id'] as string | undefined;
+        const serviceName = model.service?.name;
         const origUserId = req.headers['x-user-id'] as string | undefined;
         const origUserDept = req.headers['x-user-dept'] as string | undefined;
         const origUserName = req.headers['x-user-name'] as string | undefined;
 
-        if (origServiceId) headers['x-service-id'] = origServiceId;
+        if (serviceName) headers['x-service-id'] = serviceName;
         if (origUserId) headers['x-user-id'] = origUserId;
         if (origUserDept) headers['x-dept-name'] = origUserDept;
         if (origUserName) headers['x-user-name'] = origUserName;
