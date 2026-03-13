@@ -14,7 +14,7 @@ export default function Footer() {
             <p className="text-sm text-gray-500 leading-relaxed">
               삼성 DS를 위한<br />AI 코딩 자동화 플랫폼
             </p>
-            <p className="text-xs text-gray-600 mt-4">v5.0.2</p>
+            <p className="text-xs text-gray-600 mt-4">v5.0.9</p>
           </div>
 
           <div>

@@ -53,7 +53,7 @@ export default function Navbar() {
 
         <div className="hidden md:flex items-center gap-3">
           <span className="px-2.5 py-1 text-xs font-mono text-brand-400 bg-brand-500/10 rounded-full border border-brand-500/20">
-            v5.0.2
+            v5.0.9
           </span>
           <a
             href={services[0].downloadUrl}
@@ -79,7 +79,7 @@ export default function Navbar() {
             </Link>
           ))}
           <a href={services[0].downloadUrl} className="block mt-3 px-4 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-brand-500 to-brand-600 rounded-lg">
-            다운로드 v5.0.2
+            다운로드 v5.0.9
           </a>
         </div>
       )}

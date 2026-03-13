@@ -23,8 +23,8 @@ export const services: ServiceInfo[] = [
     gradient: 'from-blue-500 to-cyan-400',
     path: '/nexus-coder',
     status: 'stable',
-    version: '5.0.2',
-    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-5.0.2.gz',
+    version: '5.0.9',
+    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-5.0.9.gz',
     features: [
       { icon: '🎯', title: 'Vibe Coding', description: '자연어 대화로 코드 작성, 리팩토링, 디버깅을 모두 처리합니다.' },
       { icon: '🌐', title: 'Browser Automation', description: 'Chrome/Edge를 직접 제어하여 프론트엔드 개발을 자동화합니다.' },
@@ -52,8 +52,8 @@ export const services: ServiceInfo[] = [
     gradient: 'from-violet-500 to-purple-400',
     path: '/nexus-bot',
     status: 'stable',
-    version: '5.0.2',
-    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Bot%20(For%20Windows)-Setup-5.0.2.exe',
+    version: '5.0.9',
+    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Bot%20(For%20Windows)-Setup-5.0.9.exe',
     features: [
       { icon: '💻', title: 'Native Windows', description: 'WSL 설치 없이 Windows 10/11에서 .exe로 바로 실행됩니다.' },
       { icon: '🔐', title: 'SSO 자동 로그인', description: 'Samsung DS GenAI Portal SSO를 통해 자동으로 인증됩니다.' },
