@@ -13,6 +13,37 @@ import { isDeveloper } from '../middleware/auth.js';
 
 export const proxyRoutes = Router();
 
+// 모든 요청 헤더 로깅 (이름/ID/부서 강조, 한글 디코딩)
+proxyRoutes.use((req, _res, next) => {
+  const decodeHeader = (val: string) => {
+    try { return Buffer.from(val, 'latin1').toString('utf-8'); } catch { return val; }
+  };
+  const userId = decodeHeader((req.headers['x-user-id'] as string) || '-');
+  const userName = decodeHeader((req.headers['x-user-name'] as string) || '-');
+  const userDept = decodeHeader((req.headers['x-user-dept'] as string) || '-');
+  const serviceId = (req.headers['x-service-id'] as string) || '-';
+
+  const otherLines: string[] = [];
+  for (const [key, val] of Object.entries(req.headers)) {
+    if (!val) continue;
+    // 이미 위에서 출력하는 헤더와 불필요한 헤더는 스킵
+    if (['x-user-id', 'x-user-name', 'x-user-dept', 'x-service-id'].includes(key)) continue;
+    const raw = Array.isArray(val) ? val.join(', ') : val;
+    if (key === 'authorization') {
+      otherLines.push(`    ${key}: ${raw.substring(0, 15)}***`);
+    } else {
+      otherLines.push(`    ${key}: ${decodeHeader(raw)}`);
+    }
+  }
+
+  console.log(
+    `[Proxy] ──── ${req.method} ${req.path} ────\n` +
+    `  👤 ID: ${userId} | 이름: ${userName} | 부서: ${userDept} | 서비스: ${serviceId}\n` +
+    `  Headers:\n${otherLines.join('\n')}`
+  );
+  next();
+});
+
 /**
  * 사용자가 슈퍼 관리자인지 확인
  * DEVELOPERS 환경변수 또는 DB Admin 테이블에서 확인
