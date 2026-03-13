@@ -88,8 +88,13 @@ upstream dashboard {
     server dashboard-${color}:80;
 }
 CONF
-    $COMPOSE exec -T nginx nginx -s reload
-    log "🔄 Nginx upstream → $color"
+    # Reload nginx if already running
+    if docker ps --format '{{.Names}}' | grep -q 'dashboard-proxy'; then
+        $COMPOSE exec -T nginx nginx -s reload
+        log "🔄 Nginx reloaded → $color"
+    else
+        log "🔄 Nginx upstream config written → $color (nginx not yet running)"
+    fi
 }
 
 # ============================================
