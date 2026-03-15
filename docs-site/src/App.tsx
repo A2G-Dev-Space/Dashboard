@@ -6,6 +6,7 @@ import DocLayout from './components/DocLayout';
 import Home from './pages/Home';
 import ServicePage from './pages/ServicePage';
 import DemosIndex from './pages/DemosIndex';
+import QuickDemoSection from './components/QuickDemoSection';
 import { services } from './data/services';
 
 function ScrollToTop() {
@@ -74,7 +75,7 @@ function DocRoute({ sectionTitle, path }: { sectionTitle: string; path: string }
     ? `demos/${path.split('/').pop()}.md`
     : guideContentPath(path);
 
-  return <DocLayout title={sectionTitle} sidebarItems={sidebarItems} contentPath={contentPath} />;
+  return <><DocLayout title={sectionTitle} sidebarItems={sidebarItems} contentPath={contentPath} /><QuickDemoSection /></>;
 }
 
 export default function App() {
@@ -86,10 +87,10 @@ export default function App() {
         <Route path="/" element={<><Home /><Footer /></>} />
 
         {/* Service pages */}
-        <Route path="/nexus-coder" element={<><ServicePage /><Footer /></>} />
-        <Route path="/nexus-bot" element={<><ServicePage /><Footer /></>} />
-        <Route path="/once" element={<><ServicePage /><Footer /></>} />
-        <Route path="/free" element={<><ServicePage /><Footer /></>} />
+        <Route path="/nexus-coder" element={<><ServicePage /><QuickDemoSection /><Footer /></>} />
+        <Route path="/nexus-bot" element={<><ServicePage /><QuickDemoSection /><Footer /></>} />
+        <Route path="/once" element={<><ServicePage /><QuickDemoSection /><Footer /></>} />
+        <Route path="/free" element={<><ServicePage /><QuickDemoSection /><Footer /></>} />
 
         {/* CLI Guide docs */}
         <Route path="/guide/getting-started" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/getting-started" />} />
@@ -120,7 +121,7 @@ export default function App() {
         <Route path="/free/faq" element={<DocRoute sectionTitle="FREE 가이드" path="/free/faq" />} />
 
         {/* Demos */}
-        <Route path="/demos" element={<><DemosIndex /><Footer /></>} />
+        <Route path="/demos" element={<><DemosIndex /><QuickDemoSection /><Footer /></>} />
         <Route path="/demos/office-automation" element={<DocRoute sectionTitle="데모" path="/demos/office-automation" />} />
         <Route path="/demos/windows-auto-update" element={<DocRoute sectionTitle="데모" path="/demos/windows-auto-update" />} />
 
