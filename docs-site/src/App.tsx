@@ -5,6 +5,7 @@ import Footer from './components/Footer';
 import DocLayout from './components/DocLayout';
 import Home from './pages/Home';
 import ServicePage from './pages/ServicePage';
+import DemosIndex from './pages/DemosIndex';
 import { services } from './data/services';
 
 function ScrollToTop() {
@@ -61,7 +62,17 @@ function DocRoute({ sectionTitle, path }: { sectionTitle: string; path: string }
     sidebarItems = services[3].guides;
   }
 
-  const contentPath = guideContentPath(path);
+  if (path.startsWith('/demos/')) {
+    const demoItems = [
+      { path: '/demos/office-automation', label: 'Office 자동화' },
+      { path: '/demos/windows-auto-update', label: 'Windows 자동 업데이트' },
+    ];
+    sidebarItems = demoItems;
+  }
+
+  const contentPath = path.startsWith('/demos/')
+    ? `demos/${path.split('/').pop()}.md`
+    : guideContentPath(path);
 
   return <DocLayout title={sectionTitle} sidebarItems={sidebarItems} contentPath={contentPath} />;
 }
@@ -107,6 +118,11 @@ export default function App() {
         <Route path="/free/guide/reports" element={<DocRoute sectionTitle="FREE 가이드" path="/free/guide/reports" />} />
         <Route path="/free/guide/admin" element={<DocRoute sectionTitle="FREE 가이드" path="/free/guide/admin" />} />
         <Route path="/free/faq" element={<DocRoute sectionTitle="FREE 가이드" path="/free/faq" />} />
+
+        {/* Demos */}
+        <Route path="/demos" element={<><DemosIndex /><Footer /></>} />
+        <Route path="/demos/office-automation" element={<DocRoute sectionTitle="데모" path="/demos/office-automation" />} />
+        <Route path="/demos/windows-auto-update" element={<DocRoute sectionTitle="데모" path="/demos/windows-auto-update" />} />
 
         {/* Fallback */}
         <Route path="*" element={

@@ -113,3 +113,8 @@ export const services: ServiceInfo[] = [
     ],
   },
 ];
+
+export const demos = [
+  { id: 'office-automation', title: 'Office 자동화', description: 'Word, Excel, PowerPoint를 AI로 제어합니다.', icon: 'file' },
+  { id: 'windows-auto-update', title: 'Windows 자동 업데이트', description: 'Desktop 앱의 자동 업데이트 과정을 확인합니다.', icon: 'refresh' },
+];
