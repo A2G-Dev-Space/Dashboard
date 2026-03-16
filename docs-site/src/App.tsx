@@ -75,7 +75,7 @@ function DocRoute({ sectionTitle, path }: { sectionTitle: string; path: string }
     ? `demos/${path.split('/').pop()}.md`
     : guideContentPath(path);
 
-  return <><DocLayout title={sectionTitle} sidebarItems={sidebarItems} contentPath={contentPath} /><QuickDemoSection /></>;
+  return <DocLayout title={sectionTitle} sidebarItems={sidebarItems} contentPath={contentPath} />;
 }
 
 export default function App() {
