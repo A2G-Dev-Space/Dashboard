@@ -515,11 +515,12 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
         ...otherParams,
       };
 
-      // 클라이언트가 max_tokens를 보내지 않으면 모델의 maxTokens를 기본값으로 주입
+      // 클라이언트가 max_tokens를 보내지 않으면 모델 context window의 70%를 기본값으로 주입
       // (일부 LLM 백엔드가 미지정 시 전체 context window를 output에 할당하여 400 발생 방지)
       if (!llmRequestBody.max_tokens && !llmRequestBody.max_completion_tokens && model.maxTokens) {
-        llmRequestBody.max_tokens = model.maxTokens;
-        console.log(`[Proxy] Injected max_tokens=${model.maxTokens} from model config (client did not specify)`);
+        const defaultMaxTokens = Math.floor(model.maxTokens * 0.7);
+        llmRequestBody.max_tokens = defaultMaxTokens;
+        console.log(`[Proxy] Injected max_tokens=${defaultMaxTokens} (70% of model maxTokens=${model.maxTokens})`);
       }
 
       const headers: Record<string, string> = {
