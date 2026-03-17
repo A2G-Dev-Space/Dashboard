@@ -590,7 +590,7 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
 /**
  * 요청 설정
  */
-const REQUEST_TIMEOUT_MS = 120000; // 2분 타임아웃
+const REQUEST_TIMEOUT_MS = 600000; // 10분
 
 /**
  * max_tokens 관련 에러인지 확인 (두 가지 패턴)

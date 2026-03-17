@@ -43,7 +43,7 @@ adminRoutes.use(requireAdmin as RequestHandler);
  * 모델 엔드포인트 Health Check
  * 실제 chat completion 및 tool call 요청을 보내서 정상 동작 확인
  */
-const HEALTH_CHECK_TIMEOUT_MS = 30000; // 30초 (실제 LLM 응답 대기)
+const HEALTH_CHECK_TIMEOUT_MS = 600000; // 10분
 
 interface HealthCheckResult {
   healthy: boolean;
