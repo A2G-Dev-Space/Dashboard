@@ -6,7 +6,7 @@
 
 import { prisma } from '../index.js';
 
-const LLM_TEST_TIMEOUT_MS = 60000;
+const LLM_TEST_TIMEOUT_MS = 600000; // 10분
 const MAX_RETRIES = 3;
 const SCHEDULER_CHECK_INTERVAL_MS = 30_000; // 30초마다 체크
 
