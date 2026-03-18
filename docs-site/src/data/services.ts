@@ -39,6 +39,8 @@ export const services: ServiceInfo[] = [
       { path: '/guide/advanced-usage', label: '고급 사용법' },
       { path: '/guide/browser-tools', label: 'Browser Tools' },
       { path: '/guide/office-tools', label: 'Office Tools' },
+      { path: '/guide/deep-research', label: 'Deep Research' },
+      { path: '/guide/confluence', label: 'Confluence 연동' },
       { path: '/guide/compact', label: 'Context 관리' },
       { path: '/guide/wsl-setup', label: 'WSL 설정' },
     ],

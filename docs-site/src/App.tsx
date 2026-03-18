@@ -24,6 +24,8 @@ function guideContentPath(path: string): string {
     '/guide/advanced-usage': 'guide/advanced-usage.md',
     '/guide/browser-tools': 'guide/browser-tools.md',
     '/guide/office-tools': 'guide/office-tools.md',
+    '/guide/deep-research': 'guide/deep-research.md',
+    '/guide/confluence': 'guide/confluence.md',
     '/guide/compact': 'guide/compact.md',
     '/guide/wsl-setup': 'guide/wsl-setup.md',
     '/guide-windows/getting-started': 'guide-windows/getting-started.md',
@@ -98,6 +100,8 @@ export default function App() {
         <Route path="/guide/advanced-usage" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/advanced-usage" />} />
         <Route path="/guide/browser-tools" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/browser-tools" />} />
         <Route path="/guide/office-tools" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/office-tools" />} />
+        <Route path="/guide/deep-research" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/deep-research" />} />
+        <Route path="/guide/confluence" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/confluence" />} />
         <Route path="/guide/compact" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/compact" />} />
         <Route path="/guide/wsl-setup" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/wsl-setup" />} />
 
