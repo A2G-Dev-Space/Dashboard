@@ -19,7 +19,7 @@ function HeroSection() {
         {/* Badge */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 mb-8 animate-fade-up">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-sm text-gray-300">v5.0.9 — Latest Release</span>
+          <span className="text-sm text-gray-300">v5.1.2 — Latest Release</span>
           <ArrowRight className="w-3.5 h-3.5 text-gray-400" />
         </div>
 
@@ -72,7 +72,7 @@ function HeroSection() {
             </div>
             <div className="p-6 font-mono text-sm leading-7">
               <div className="text-gray-500">$ nexus</div>
-              <div className="text-brand-400 mt-2">╭ Nexus Coder v5.0.9</div>
+              <div className="text-brand-400 mt-2">╭ Nexus Coder v5.1.2</div>
               <div className="text-gray-400">│</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Connected to AI Engine</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Browser Tools Ready</div>
@@ -97,7 +97,7 @@ function StatsSection() {
     { value: '4', label: '통합 서비스', suffix: '' },
     { value: '56+', label: 'Office 도구', suffix: '' },
     { value: '100', label: 'Air-Gapped', suffix: '%' },
-    { value: '5.0', label: '최신 버전', suffix: '' },
+    { value: '5.1', label: '최신 버전', suffix: '' },
   ];
 
   return (
