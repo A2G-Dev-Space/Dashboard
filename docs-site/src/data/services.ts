@@ -41,6 +41,7 @@ export const services: ServiceInfo[] = [
       { path: '/guide/office-tools', label: 'Office Tools' },
       { path: '/guide/deep-research', label: 'Deep Research' },
       { path: '/guide/confluence', label: 'Confluence 연동' },
+      { path: '/guide/jira', label: 'Jira 연동' },
       { path: '/guide/compact', label: 'Context 관리' },
       { path: '/guide/wsl-setup', label: 'WSL 설정' },
     ],
