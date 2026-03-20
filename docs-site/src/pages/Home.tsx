@@ -19,7 +19,7 @@ function HeroSection() {
         {/* Badge */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 mb-8 animate-fade-up">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-sm text-gray-300">v5.1.2 — Latest Release</span>
+          <span className="text-sm text-gray-300">v5.2.0 — Knox Messenger 연동 오픈</span>
           <ArrowRight className="w-3.5 h-3.5 text-gray-400" />
         </div>
 
@@ -35,6 +35,10 @@ function HeroSection() {
           <br className="hidden sm:block" />
           브라우저 자동화, 오피스 자동화까지 — 올인원 코딩 에이전트.
         </p>
+        <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 mb-4 animate-fade-up" style={{ animationDelay: '0.22s' }}>
+          <span className="text-lg">📱</span>
+          <span className="text-sm text-blue-300 font-medium">Knox Messenger로 어디서든 내 AI 비서를 원격 조작하세요!</span>
+        </div>
         <p className="text-sm text-gray-500 mb-12 animate-fade-up" style={{ animationDelay: '0.25s' }}>
           동일한 AI 엔진, 다른 인터페이스 — CLI와 Windows GUI 중 선택하세요.
         </p>
