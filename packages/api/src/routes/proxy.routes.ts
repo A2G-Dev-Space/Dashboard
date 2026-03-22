@@ -181,6 +181,22 @@ function extractBusinessUnit(deptname: string): string {
 }
 
 /**
+ * deptname에서 팀명 추출
+ * "S/W혁신팀(S.LSI)" → "S/W혁신팀", "DS/AI팀" → "AI팀"
+ */
+function extractTeam(deptname: string): string {
+  if (!deptname) return '';
+  // "팀이름(사업부)" 형식에서 팀명 추출 (괄호 앞부분)
+  const match = deptname.match(/^(.+?)\s*\(/);
+  if (match) return match[1].trim();
+  // "사업부/팀이름" 형식
+  const parts = deptname.split('/');
+  if (parts.length >= 2) return parts.slice(1).join('/').trim();
+  // 그 외: deptname 자체를 팀명으로
+  return deptname.trim();
+}
+
+/**
  * URL 인코딩된 텍스트 디코딩 (한글 등)
  * 디코딩 실패 시 원본 반환
  */
@@ -205,6 +221,7 @@ async function getOrCreateUser(req: Request) {
   const username = safeDecodeURIComponent((req.headers['x-user-name'] as string) || DEFAULT_USER.username);
   const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || DEFAULT_USER.deptname);
   const businessUnit = extractBusinessUnit(deptname);
+  const team = extractTeam(deptname);
 
   const user = await prisma.user.upsert({
     where: { loginid },
@@ -212,12 +229,14 @@ async function getOrCreateUser(req: Request) {
       lastActive: new Date(),
       deptname,  // 조직개편 시 자동 갱신
       businessUnit,
+      team,
     },
     create: {
       loginid,
       username,
       deptname,
       businessUnit,
+      team,
     },
   });
 
@@ -341,6 +360,7 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
         sortOrder: true,
         supportsVision: true,
         allowedBusinessUnits: true,
+        allowedTeams: true,
         superAdminOnly: true,
         service: {
           select: {
@@ -359,10 +379,12 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
     const hasSuperAdminModels = models.some((m) => m.superAdminOnly);
     const userIsSuperAdmin = hasSuperAdminModels ? await isUserSuperAdmin(loginid) : false;
 
-    // 사업부 제한 필터링: X-User-Dept 헤더에서 businessUnit 추출
+    // 사업부/팀 제한 필터링: X-User-Dept 헤더에서 businessUnit, team 추출
     const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
     const businessUnit = extractBusinessUnit(deptname);
-    const hasRestricted = models.some((m) => m.allowedBusinessUnits.length > 0);
+    const team = extractTeam(deptname);
+    const hasBURestricted = models.some((m) => m.allowedBusinessUnits.length > 0);
+    const hasTeamRestricted = models.some((m) => m.allowedTeams.length > 0);
 
     let filtered = models;
 
@@ -372,13 +394,23 @@ proxyRoutes.get('/models', async (req: Request, res: Response) => {
     }
 
     // 사업부 필터
-    if (hasRestricted && !businessUnit) {
+    if (hasBURestricted && !businessUnit) {
       // X-User-Dept 헤더 없이 호출 → 경고 로그만 남기고 전체 반환
       const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
       console.warn(`[BU-Filter] GET /v1/models called without X-User-Dept header: user=${loginid}, service=${serviceHeader}`);
     } else if (businessUnit) {
       filtered = filtered.filter(
         (m) => m.allowedBusinessUnits.length === 0 || m.allowedBusinessUnits.includes(businessUnit)
+      );
+    }
+
+    // 팀 필터
+    if (hasTeamRestricted && !team) {
+      const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+      console.warn(`[Team-Filter] GET /v1/models called without team info: user=${loginid}, service=${serviceHeader}`);
+    } else if (team) {
+      filtered = filtered.filter(
+        (m) => m.allowedTeams.length === 0 || m.allowedTeams.includes(team)
       );
     }
 
@@ -467,8 +499,8 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
     }
 
     // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
+    const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
     if (model.allowedBusinessUnits.length > 0) {
-      const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
       const userBU = extractBusinessUnit(deptname);
       if (!userBU) {
         const loginid = (req.headers['x-user-id'] as string) || 'unknown';
@@ -476,6 +508,19 @@ proxyRoutes.post('/chat/completions', async (req: Request, res: Response) => {
         console.warn(`[BU-Filter] POST /v1/chat/completions called without X-User-Dept header: user=${loginid}, service=${serviceHeader}, model=${modelName}, allowedBU=[${model.allowedBusinessUnits.join(',')}]`);
       } else if (!model.allowedBusinessUnits.includes(userBU)) {
         res.status(403).json({ error: `Model '${modelName}' is not available for your business unit (${userBU})` });
+        return;
+      }
+    }
+
+    // 팀 제한 체크
+    if (model.allowedTeams.length > 0) {
+      const userTeam = extractTeam(deptname);
+      if (!userTeam) {
+        const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+        const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+        console.warn(`[Team-Filter] POST /v1/chat/completions called without team info: user=${loginid}, service=${serviceHeader}, model=${modelName}, allowedTeams=[${model.allowedTeams.join(',')}]`);
+      } else if (!model.allowedTeams.includes(userTeam)) {
+        res.status(403).json({ error: `Model '${modelName}' is not available for your team (${userTeam})` });
         return;
       }
     }
@@ -1094,6 +1139,7 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
         supportsVision: true,
         superAdminOnly: true,
         allowedBusinessUnits: true,
+        allowedTeams: true,
         service: {
           select: {
             name: true,
@@ -1116,9 +1162,9 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
       }
     }
 
-    // 사업부 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
+    // 사업부/팀 제한 체크 (soft enforcement: 헤더 없으면 경고 로그만 남기고 통과)
+    const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
     if (model.allowedBusinessUnits.length > 0) {
-      const deptname = safeDecodeURIComponent((req.headers['x-user-dept'] as string) || '');
       const userBU = extractBusinessUnit(deptname);
       if (!userBU) {
         const loginid = (req.headers['x-user-id'] as string) || 'unknown';
@@ -1126,6 +1172,18 @@ proxyRoutes.get('/models/:modelName', async (req: Request, res: Response) => {
         console.warn(`[BU-Filter] GET /v1/models/${modelName} called without X-User-Dept header: user=${loginid}, service=${serviceHeader}, allowedBU=[${model.allowedBusinessUnits.join(',')}]`);
       } else if (!model.allowedBusinessUnits.includes(userBU)) {
         res.status(403).json({ error: `Model '${modelName}' is not available for your business unit (${userBU})` });
+        return;
+      }
+    }
+
+    if (model.allowedTeams.length > 0) {
+      const userTeam = extractTeam(deptname);
+      if (!userTeam) {
+        const loginid = (req.headers['x-user-id'] as string) || 'unknown';
+        const serviceHeader = (req.headers['x-service-id'] as string) || 'unknown';
+        console.warn(`[Team-Filter] GET /v1/models/${modelName} called without team info: user=${loginid}, service=${serviceHeader}, allowedTeams=[${model.allowedTeams.join(',')}]`);
+      } else if (!model.allowedTeams.includes(userTeam)) {
+        res.status(403).json({ error: `Model '${modelName}' is not available for your team (${userTeam})` });
         return;
       }
     }

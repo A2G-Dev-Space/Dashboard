@@ -337,6 +337,7 @@ const modelSchema = z.object({
   agentDashboardServiceId: z.string().max(100).optional().nullable(),
   serviceId: z.string().uuid().optional(),
   allowedBusinessUnits: z.array(z.string()).optional(),
+  allowedTeams: z.array(z.string()).optional(),
 });
 
 /**
@@ -975,6 +976,37 @@ adminRoutes.get('/business-units', async (_req: AuthenticatedRequest, res) => {
   } catch (error) {
     console.error('Get business units error:', error);
     res.status(500).json({ error: 'Failed to get business units' });
+  }
+});
+
+/**
+ * GET /admin/teams
+ * Get distinct teams from users table
+ * Query: ?businessUnit= (optional, filter teams by business unit)
+ */
+adminRoutes.get('/teams', async (req: AuthenticatedRequest, res) => {
+  try {
+    const businessUnit = req.query['businessUnit'] as string | undefined;
+
+    const whereClause: Record<string, unknown> = {
+      team: { not: null },
+      NOT: { team: '' },
+    };
+
+    if (businessUnit) {
+      whereClause['businessUnit'] = businessUnit;
+    }
+
+    const teams = await prisma.user.findMany({
+      where: whereClause,
+      select: { team: true },
+      distinct: ['team'],
+      orderBy: { team: 'asc' },
+    });
+    res.json({ teams: teams.map((u) => u.team).filter(Boolean) });
+  } catch (error) {
+    console.error('Get teams error:', error);
+    res.status(500).json({ error: 'Failed to get teams' });
   }
 });
 

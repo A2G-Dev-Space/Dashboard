@@ -152,6 +152,42 @@ async function ensureDefaultService() {
 }
 
 // Start server
+/**
+ * 기존 사용자의 deptname에서 team 필드를 추출하여 백필 (idempotent)
+ */
+async function backfillUserTeams() {
+  const usersWithoutTeam = await prisma.user.findMany({
+    where: { team: null, NOT: { deptname: '' } },
+    select: { id: true, deptname: true },
+  });
+
+  if (usersWithoutTeam.length === 0) return;
+
+  let updated = 0;
+  for (const user of usersWithoutTeam) {
+    const deptname = user.deptname;
+    let team = '';
+    // "팀이름(사업부)" 형식
+    const match = deptname.match(/^(.+?)\s*\(/);
+    if (match) {
+      team = match[1].trim();
+    } else {
+      // "사업부/팀이름" 형식
+      const parts = deptname.split('/');
+      team = parts.length >= 2 ? parts.slice(1).join('/').trim() : deptname.trim();
+    }
+
+    if (team) {
+      await prisma.user.update({ where: { id: user.id }, data: { team } });
+      updated++;
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`[Backfill] Updated team field for ${updated} users`);
+  }
+}
+
 async function main() {
   try {
     // Test database connection
@@ -167,6 +203,9 @@ async function main() {
 
     // Seed 2026 holidays (idempotent)
     await seedHolidays(prisma);
+
+    // Backfill team field for existing users (one-time, idempotent)
+    await backfillUserTeams();
 
     const server = app.listen(PORT, () => {
       console.log(`Syngha's Portal API server running on port ${PORT}`);

@@ -42,6 +42,7 @@ model User {
   username     String
   deptname     String   @default("")
   businessUnit String?  @map("business_unit")  // deptname에서 추출 (예: "DS/AI팀" → "DS")
+  team         String?                         // deptname에서 추출 (예: "S/W혁신팀(S.LSI)" → "S/W혁신팀")
   firstSeen    DateTime @default(now())
   lastActive   DateTime @default(now())
   isActive     Boolean  @default(true)
@@ -93,6 +94,9 @@ model Model {
 
   // 사업부 제한 (빈 배열 = 제한 없음, 모든 사업부 허용)
   allowedBusinessUnits String[] @default([]) @map("allowed_business_units")
+
+  // 팀 제한 (빈 배열 = 제한 없음, 모든 팀 허용)
+  allowedTeams String[] @default([]) @map("allowed_teams")
 
   // 슈퍼 관리자 전용 (true면 SUPER_ADMIN만 사용 가능)
   superAdminOnly Boolean @default(false) @map("super_admin_only")

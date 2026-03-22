@@ -32,6 +32,7 @@ interface Model {
   agentDashboardEnabled?: boolean;
   agentDashboardServiceId?: string | null;
   allowedBusinessUnits?: string[];
+  allowedTeams?: string[];
   subModels?: SubModel[];
 }
 
@@ -256,7 +257,7 @@ export default function Models({ serviceId }: ModelsProps) {
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                사업부 제한
+                접근 제한
               </th>
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
@@ -345,16 +346,32 @@ export default function Models({ serviceId }: ModelsProps) {
                   </button>
                 </td>
                 <td className="px-6 py-4">
-                  {model.allowedBusinessUnits && model.allowedBusinessUnits.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {model.allowedBusinessUnits.map((bu) => (
-                        <span
-                          key={bu}
-                          className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full"
-                        >
-                          {bu}
-                        </span>
-                      ))}
+                  {(model.allowedBusinessUnits && model.allowedBusinessUnits.length > 0) || (model.allowedTeams && model.allowedTeams.length > 0) ? (
+                    <div className="space-y-1">
+                      {model.allowedBusinessUnits && model.allowedBusinessUnits.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {model.allowedBusinessUnits.map((bu) => (
+                            <span
+                              key={bu}
+                              className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded-full"
+                            >
+                              {bu}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {model.allowedTeams && model.allowedTeams.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {model.allowedTeams.map((team) => (
+                            <span
+                              key={team}
+                              className="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full"
+                            >
+                              {team}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <span className="text-xs text-gray-400">전체 허용</span>
@@ -551,11 +568,14 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
     agentDashboardServiceId: model?.agentDashboardServiceId || '',
     serviceId: model?.serviceId || serviceId || '',
     allowedBusinessUnits: model?.allowedBusinessUnits || [] as string[],
+    allowedTeams: model?.allowedTeams || [] as string[],
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [businessUnits, setBusinessUnits] = useState<string[]>([]);
   const [buLoading, setBuLoading] = useState(true);
+  const [teams, setTeams] = useState<string[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<HealthCheckResult | null>(null);
   const [testPassed, setTestPassed] = useState(false);  // 테스트 통과 여부
@@ -565,6 +585,10 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
       .then((res) => setBusinessUnits(res.data.businessUnits))
       .catch((err) => console.error('Failed to load business units:', err))
       .finally(() => setBuLoading(false));
+    modelsApi.teams()
+      .then((res) => setTeams(res.data.teams))
+      .catch((err) => console.error('Failed to load teams:', err))
+      .finally(() => setTeamsLoading(false));
   }, []);
 
   // 편집 모드에서는 테스트 필수 아님 (기존 통과 간주)
@@ -631,6 +655,15 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
       allowedBusinessUnits: prev.allowedBusinessUnits.includes(bu)
         ? prev.allowedBusinessUnits.filter((b) => b !== bu)
         : [...prev.allowedBusinessUnits, bu],
+    }));
+  };
+
+  const toggleTeam = (team: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      allowedTeams: prev.allowedTeams.includes(team)
+        ? prev.allowedTeams.filter((t) => t !== team)
+        : [...prev.allowedTeams, team],
     }));
   };
 
@@ -968,6 +1001,64 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, allowedBusinessUnits: [] })}
+                  className="text-xs text-gray-500 hover:text-gray-700 underline ml-1"
+                >
+                  전체 해제
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 팀 제한 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              팀 제한
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              선택하지 않으면 모든 팀에서 사용 가능합니다.
+            </p>
+            {teamsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-transparent"></div>
+                로딩 중...
+              </div>
+            ) : teams.length === 0 ? (
+              <p className="text-sm text-gray-400">등록된 팀이 없습니다.</p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto space-y-1">
+                {teams.map((team) => (
+                  <label key={team} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded">
+                    <input
+                      type="checkbox"
+                      checked={formData.allowedTeams.includes(team)}
+                      onChange={() => toggleTeam(team)}
+                      className="w-4 h-4 text-samsung-blue rounded focus:ring-samsung-blue"
+                    />
+                    <span className="text-sm text-gray-700">{team}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {formData.allowedTeams.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {formData.allowedTeams.map((team) => (
+                  <span
+                    key={team}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full"
+                  >
+                    {team}
+                    <button
+                      type="button"
+                      onClick={() => toggleTeam(team)}
+                      className="hover:text-blue-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, allowedTeams: [] })}
                   className="text-xs text-gray-500 hover:text-gray-700 underline ml-1"
                 >
                   전체 해제

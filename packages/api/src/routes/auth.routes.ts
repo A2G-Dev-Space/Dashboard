@@ -41,6 +41,20 @@ function extractBusinessUnit(deptname: string): string {
 }
 
 /**
+ * deptname에서 팀명 추출
+ */
+function extractTeam(deptname: string): string {
+  if (!deptname) return '';
+  // "팀이름(사업부)" 형식에서 팀명 추출
+  const match = deptname.match(/^(.+?)\s*\(/);
+  if (match) return match[1].trim();
+  // "사업부/팀이름" 형식
+  const parts = deptname.split('/');
+  if (parts.length >= 2) return parts.slice(1).join('/').trim();
+  return deptname.trim();
+}
+
+/**
  * POST /auth/callback
  * SSO callback - sync user with database
  */
@@ -56,6 +70,7 @@ authRoutes.post('/callback', authenticateToken, async (req: AuthenticatedRequest
     const deptname = safeDecodeURIComponent(req.user.deptname || '');
     const username = safeDecodeURIComponent(req.user.username || '');
     const businessUnit = extractBusinessUnit(deptname);
+    const team = extractTeam(deptname);
 
     // Upsert user in database
     const user = await prisma.user.upsert({
@@ -64,6 +79,7 @@ authRoutes.post('/callback', authenticateToken, async (req: AuthenticatedRequest
         deptname,
         username,
         businessUnit,
+        team,
         lastActive: new Date(),
       },
       create: {
@@ -71,6 +87,7 @@ authRoutes.post('/callback', authenticateToken, async (req: AuthenticatedRequest
         deptname,
         username,
         businessUnit,
+        team,
       },
     });
 
@@ -191,6 +208,7 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
     const deptname = safeDecodeURIComponent(req.user.deptname || '');
     const username = safeDecodeURIComponent(req.user.username || '');
     const businessUnit = extractBusinessUnit(deptname);
+    const team = extractTeam(deptname);
 
     // Upsert user in database
     const user = await prisma.user.upsert({
@@ -199,6 +217,7 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
         deptname,
         username,
         businessUnit,
+        team,
         lastActive: new Date(),
       },
       create: {
@@ -206,6 +225,7 @@ authRoutes.post('/login', authenticateToken, async (req: AuthenticatedRequest, r
         deptname,
         username,
         businessUnit,
+        team,
       },
     });
 

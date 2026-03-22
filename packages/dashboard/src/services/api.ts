@@ -63,6 +63,7 @@ export const modelsApi = {
   delete: (id: string, force = false) => api.delete(`/admin/models/${id}`, { params: { force } }),
   reorder: (modelIds: string[]) => api.put('/admin/models/reorder', { modelIds }),
   businessUnits: () => api.get('/admin/business-units'),
+  teams: (businessUnit?: string) => api.get('/admin/teams', { params: businessUnit ? { businessUnit } : {} }),
   // SubModel API (로드밸런싱)
   listSubModels: (modelId: string) => api.get(`/admin/models/${modelId}/sub-models`),
   createSubModel: (modelId: string, data: CreateSubModelData) => api.post(`/admin/models/${modelId}/sub-models`, data),
@@ -191,6 +192,7 @@ interface CreateModelData {
   agentDashboardServiceId?: string | null;
   serviceId?: string;
   allowedBusinessUnits?: string[];
+  allowedTeams?: string[];
 }
 
 interface CreateSubModelData {
