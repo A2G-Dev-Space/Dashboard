@@ -102,12 +102,17 @@ export default function App() {
         <Route path="/guide/office-tools" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/office-tools" />} />
         <Route path="/guide/deep-research" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/deep-research" />} />
         <Route path="/guide/confluence" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/confluence" />} />
+        <Route path="/guide/jira" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/jira" />} />
         <Route path="/guide/compact" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/compact" />} />
+        <Route path="/guide/knox-messenger" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/knox-messenger" />} />
+        <Route path="/guide/jarvis-memory" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/jarvis-memory" />} />
         <Route path="/guide/wsl-setup" element={<DocRoute sectionTitle="Nexus Coder 가이드" path="/guide/wsl-setup" />} />
 
         {/* Nexus Bot Guide docs */}
         <Route path="/guide-windows/getting-started" element={<DocRoute sectionTitle="Nexus Bot 가이드" path="/guide-windows/getting-started" />} />
         <Route path="/guide-windows/basic-usage" element={<DocRoute sectionTitle="Nexus Bot 가이드" path="/guide-windows/basic-usage" />} />
+        <Route path="/guide-windows/knox-messenger" element={<DocRoute sectionTitle="Nexus Bot 가이드" path="/guide-windows/knox-messenger" />} />
+        <Route path="/guide-windows/jarvis-memory" element={<DocRoute sectionTitle="Nexus Bot 가이드" path="/guide-windows/jarvis-memory" />} />
         <Route path="/guide-windows/faq" element={<DocRoute sectionTitle="Nexus Bot 가이드" path="/guide-windows/faq" />} />
 
         {/* ONCE docs */}

@@ -76,7 +76,7 @@ function HeroSection() {
             </div>
             <div className="p-6 font-mono text-sm leading-7">
               <div className="text-gray-500">$ nexus</div>
-              <div className="text-brand-400 mt-2">╭ Nexus Coder v5.1.2</div>
+              <div className="text-brand-400 mt-2">╭ Nexus Coder v5.2.1</div>
               <div className="text-gray-400">│</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Connected to AI Engine</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Browser Tools Ready</div>
