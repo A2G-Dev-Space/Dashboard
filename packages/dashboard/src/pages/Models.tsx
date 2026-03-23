@@ -585,11 +585,25 @@ function ModelModal({ model, serviceId, onClose, onSave }: ModelModalProps) {
       .then((res) => setBusinessUnits(res.data.businessUnits))
       .catch((err) => console.error('Failed to load business units:', err))
       .finally(() => setBuLoading(false));
-    modelsApi.teams()
-      .then((res) => setTeams(res.data.teams))
+  }, []);
+
+  // 사업부 선택이 바뀌면 해당 사업부 소속 팀만 로드
+  useEffect(() => {
+    setTeamsLoading(true);
+    const buFilter = formData.allowedBusinessUnits.length > 0 ? formData.allowedBusinessUnits : undefined;
+    modelsApi.teams(buFilter)
+      .then((res) => {
+        const newTeams: string[] = res.data.teams;
+        setTeams(newTeams);
+        // 사업부 변경으로 사라진 팀은 선택에서 제거
+        setFormData((prev) => ({
+          ...prev,
+          allowedTeams: prev.allowedTeams.filter((t) => newTeams.includes(t)),
+        }));
+      })
       .catch((err) => console.error('Failed to load teams:', err))
       .finally(() => setTeamsLoading(false));
-  }, []);
+  }, [formData.allowedBusinessUnits]);
 
   // 편집 모드에서는 테스트 필수 아님 (기존 통과 간주)
   useEffect(() => {

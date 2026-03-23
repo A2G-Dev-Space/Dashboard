@@ -982,19 +982,22 @@ adminRoutes.get('/business-units', async (_req: AuthenticatedRequest, res) => {
 /**
  * GET /admin/teams
  * Get distinct teams from users table
- * Query: ?businessUnit= (optional, filter teams by business unit)
+ * Query: ?businessUnits= (optional, comma-separated business unit names)
  */
 adminRoutes.get('/teams', async (req: AuthenticatedRequest, res) => {
   try {
-    const businessUnit = req.query['businessUnit'] as string | undefined;
+    const businessUnitsParam = req.query['businessUnits'] as string | undefined;
 
     const whereClause: Record<string, unknown> = {
       team: { not: null },
       NOT: { team: '' },
     };
 
-    if (businessUnit) {
-      whereClause['businessUnit'] = businessUnit;
+    if (businessUnitsParam) {
+      const buList = businessUnitsParam.split(',').map((b) => b.trim()).filter(Boolean);
+      if (buList.length > 0) {
+        whereClause['businessUnit'] = { in: buList };
+      }
     }
 
     const teams = await prisma.user.findMany({
