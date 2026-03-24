@@ -4,6 +4,7 @@ import { ChevronRight, Menu, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import { useLatestVersion } from '../hooks/useLatestVersion';
 
 interface SidebarItem {
   path: string;
@@ -21,6 +22,7 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { version } = useLatestVersion();
 
   useEffect(() => {
     setLoading(true);
@@ -65,12 +67,14 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
               ? `> ${icon} **${heading}**\n>\n${lines}\n`
               : `> ${icon}\n>\n${lines}\n`;
           });
-        setContent(processed);
+        // Replace {{VERSION}} placeholders with latest version from MinIO
+        const withVersion = processed.replace(/\{\{VERSION\}\}/g, version);
+        setContent(withVersion);
         setLoading(false);
       })
       .catch(() => { setContent('# 로딩 실패'); setLoading(false); });
     window.scrollTo(0, 0);
-  }, [contentPath]);
+  }, [contentPath, version]);
 
   return (
     <div className="min-h-screen bg-white pt-16">

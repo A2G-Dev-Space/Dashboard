@@ -63,8 +63,8 @@ A2G 파일 서버에서 두 파일을 다운로드합니다:
 # 다운로드 폴더 생성
 mkdir -p ~/nexus-download && cd ~/nexus-download
 
-# nexus-5.0.9.gz 다운로드
-wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-5.0.9.gz
+# nexus-{{VERSION}}.gz 다운로드
+wget http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-{{VERSION}}.gz
 
 # yoga.wasm 다운로드
 wget http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
@@ -72,7 +72,7 @@ wget http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 
 ::: tip wget 대신 curl 사용
 ```bash
-curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-5.0.9.gz
+curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/nexus-{{VERSION}}.gz
 curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 ```
 :::
@@ -87,10 +87,10 @@ curl -LO http://a2g.samsungds.net:13000/nexus-coder/cli/yoga.wasm
 
 ```bash
 # 압축 해제
-gunzip nexus-5.0.9.gz
+gunzip nexus-{{VERSION}}.gz
 
 # 파일명 변경 및 실행 권한 부여
-mv nexus-5.0.9 nexus
+mv nexus-{{VERSION}} nexus
 chmod +x nexus
 ```
 
