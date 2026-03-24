@@ -23,7 +23,7 @@ export const services: ServiceInfo[] = [
     gradient: 'from-blue-500 to-cyan-400',
     path: '/nexus-coder',
     status: 'stable',
-    version: '5.2.3',
+    version: '5.2.4',
     // CLI는 자동 업데이트 — 수동 다운로드 없음
     features: [
       { icon: '🎯', title: 'Vibe Coding', description: '자연어 대화로 코드 작성, 리팩토링, 디버깅을 모두 처리합니다.' },
@@ -60,8 +60,8 @@ export const services: ServiceInfo[] = [
     gradient: 'from-violet-500 to-purple-400',
     path: '/nexus-bot',
     status: 'stable',
-    version: '5.2.3',
-    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Bot%20(For%20Windows)-Setup-5.2.3.exe',
+    version: '5.2.4',
+    downloadUrl: 'http://a2g.samsungds.net:13000/nexus-coder-for-windows/Nexus%20Bot%20(For%20Windows)-Setup-5.2.4.exe',
     features: [
       { icon: '💻', title: 'Native Windows', description: 'WSL 설치 없이 Windows 10/11에서 .exe로 바로 실행됩니다.' },
       { icon: '📱', title: 'Knox Messenger 연동', description: '"자비스 연결" 버튼 한번으로 Knox Messenger와 연결. 어디서든 원격으로 내 PC의 AI에 작업 지시 가능.' },
