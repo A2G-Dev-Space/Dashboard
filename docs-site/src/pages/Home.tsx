@@ -21,7 +21,7 @@ function HeroSection() {
         {/* Badge */}
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/5 border border-white/10 mb-8 animate-fade-up">
           <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-sm text-gray-300">v5.2.0 — Knox Messenger 연동 오픈</span>
+          <span className="text-sm text-gray-300">v{version} — 최신 버전 배포됨</span>
           <ArrowRight className="w-3.5 h-3.5 text-gray-400" />
         </div>
 
