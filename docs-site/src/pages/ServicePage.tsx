@@ -1,11 +1,18 @@
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, Download } from 'lucide-react';
 import { services } from '../data/services';
+import { useLatestVersion } from '../hooks/useLatestVersion';
 
 export default function ServicePage() {
   const location = useLocation();
   const service = services.find((s) => s.path === location.pathname);
+  const latestVersion = useLatestVersion();
   if (!service) return <div className="min-h-screen flex items-center justify-center pt-16 text-gray-500">서비스를 찾을 수 없습니다.</div>;
+
+  // Nexus Coder / Nexus Bot: use dynamic version from MinIO
+  const isNexus = service.id === 'nexus-coder' || service.id === 'nexus-bot';
+  const displayVersion = isNexus ? latestVersion.version : service.version;
+  const displayDownloadUrl = service.id === 'nexus-bot' ? latestVersion.downloadUrl : service.downloadUrl;
 
   return (
     <div className="min-h-screen">
@@ -45,13 +52,13 @@ export default function ServicePage() {
                 시작하기 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
             )}
-            {service.downloadUrl && (
+            {displayDownloadUrl && (
               <a
-                href={service.downloadUrl}
+                href={displayDownloadUrl}
                 className="px-6 py-3 text-sm font-semibold text-gray-300 glass rounded-xl hover:bg-white/10 transition-all flex items-center gap-2"
               >
                 <Download className="w-4 h-4" />
-                다운로드 v{service.version}
+                다운로드 v{displayVersion}
               </a>
             )}
           </div>

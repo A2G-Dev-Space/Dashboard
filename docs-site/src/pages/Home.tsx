@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight, Terminal, Sparkles, Zap, Globe, FileText, GitBranch, Monitor } from 'lucide-react';
 import { services } from '../data/services';
+import { useLatestVersion } from '../hooks/useLatestVersion';
 
 function HeroSection() {
+  const { version } = useLatestVersion();
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-surface">
       {/* Animated gradient orbs */}
@@ -76,7 +78,7 @@ function HeroSection() {
             </div>
             <div className="p-6 font-mono text-sm leading-7">
               <div className="text-gray-500">$ nexus</div>
-              <div className="text-brand-400 mt-2">╭ Nexus Coder v5.2.4</div>
+              <div className="text-brand-400 mt-2">╭ Nexus Coder v{version}</div>
               <div className="text-gray-400">│</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Connected to AI Engine</div>
               <div className="text-white">│ <span className="text-green-400">✓</span> Browser Tools Ready</div>
@@ -97,11 +99,12 @@ function HeroSection() {
 }
 
 function StatsSection() {
+  const { version } = useLatestVersion();
   const stats = [
     { value: '4', label: '통합 서비스', suffix: '' },
     { value: '56+', label: 'Office 도구', suffix: '' },
     { value: '100', label: 'Air-Gapped', suffix: '%' },
-    { value: '5.1', label: '최신 버전', suffix: '' },
+    { value: version, label: '최신 버전', suffix: '' },
   ];
 
   return (

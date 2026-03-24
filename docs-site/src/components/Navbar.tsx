@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, ChevronDown } from 'lucide-react';
 import { services } from '../data/services';
+import { useLatestVersion } from '../hooks/useLatestVersion';
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const location = useLocation();
+  const { version, downloadUrl } = useLatestVersion();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-white/5">
@@ -56,10 +58,10 @@ export default function Navbar() {
 
         <div className="hidden md:flex items-center gap-3">
           <span className="px-2.5 py-1 text-xs font-mono text-brand-400 bg-brand-500/10 rounded-full border border-brand-500/20">
-            v5.2.4
+            v{version}
           </span>
           <a
-            href={services.find(s => s.id === 'nexus-bot')?.downloadUrl}
+            href={downloadUrl}
             className="px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-brand-500 to-brand-600 rounded-lg hover:shadow-lg hover:shadow-brand-500/25 transition-all hover:-translate-y-0.5"
           >
             Nexus Bot 다운로드
@@ -84,8 +86,8 @@ export default function Navbar() {
           <Link to="/demos" onClick={() => setOpen(false)} className="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-300 hover:text-white hover:bg-white/5">
             <span className="text-sm font-medium">데모</span>
           </Link>
-          <a href={services.find(s => s.id === 'nexus-bot')?.downloadUrl} className="block mt-3 px-4 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-brand-500 to-brand-600 rounded-lg">
-            Nexus Bot 다운로드 v5.2.4
+          <a href={downloadUrl} className="block mt-3 px-4 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-brand-500 to-brand-600 rounded-lg">
+            Nexus Bot 다운로드 v{version}
           </a>
         </div>
       )}

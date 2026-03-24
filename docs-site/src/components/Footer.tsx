@@ -1,7 +1,9 @@
 import { Link } from 'react-router-dom';
 import { services } from '../data/services';
+import { useLatestVersion } from '../hooks/useLatestVersion';
 
 export default function Footer() {
+  const { version } = useLatestVersion();
   return (
     <footer className="bg-surface border-t border-white/5">
       <div className="max-w-7xl mx-auto px-6 py-16">
@@ -14,7 +16,7 @@ export default function Footer() {
             <p className="text-sm text-gray-500 leading-relaxed">
               삼성 DS를 위한<br />AI 코딩 자동화 플랫폼
             </p>
-            <p className="text-xs text-gray-600 mt-4">v5.0.9</p>
+            <p className="text-xs text-gray-600 mt-4">v{version}</p>
           </div>
 
           <div>
