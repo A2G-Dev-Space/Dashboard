@@ -56,7 +56,7 @@ export default function Navbar() {
 
         <div className="hidden md:flex items-center gap-3">
           <span className="px-2.5 py-1 text-xs font-mono text-brand-400 bg-brand-500/10 rounded-full border border-brand-500/20">
-            v5.2.2
+            v5.2.3
           </span>
           <a
             href={services.find(s => s.id === 'nexus-bot')?.downloadUrl}
@@ -85,7 +85,7 @@ export default function Navbar() {
             <span className="text-sm font-medium">데모</span>
           </Link>
           <a href={services.find(s => s.id === 'nexus-bot')?.downloadUrl} className="block mt-3 px-4 py-3 text-sm font-medium text-center text-white bg-gradient-to-r from-brand-500 to-brand-600 rounded-lg">
-            Nexus Bot 다운로드 v5.2.2
+            Nexus Bot 다운로드 v5.2.3
           </a>
         </div>
       )}
