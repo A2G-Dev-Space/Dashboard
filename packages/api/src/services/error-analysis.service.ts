@@ -102,7 +102,22 @@ Then provide the analysis.`;
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    if (extraHeaders) Object.assign(headers, extraHeaders);
+    if (extraHeaders) {
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey !== 'content-type' && lowerKey !== 'authorization') {
+          headers[key] = value;
+        }
+      }
+    }
+
+    // Agent Dashboard 정책: 모델에 설정된 서비스ID + 에러 보고 사용자 정보를 헤더로 전달
+    if (model.agentDashboardEnabled) {
+      if (model.agentDashboardServiceId) headers['x-service-id'] = model.agentDashboardServiceId;
+      if (errorLog.user?.loginid) headers['x-user-id'] = errorLog.user.loginid;
+      if (errorLog.user?.deptname) headers['x-dept-name'] = errorLog.user.deptname;
+      if (errorLog.user?.username) headers['x-user-name'] = errorLog.user.username;
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
