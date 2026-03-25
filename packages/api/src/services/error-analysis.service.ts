@@ -190,16 +190,19 @@ Then provide the analysis.`;
     const severity = severityMatch ? severityMatch[1].toUpperCase() : 'MEDIUM';
     const analysis = content.replace(/^SEVERITY:\s*(CRITICAL|HIGH|MEDIUM|LOW)\s*/i, '').trim() || content;
 
-    await prisma.errorLog.update({
-      where: { id: errorLog.id },
-      data: {
-        severity,
-        aiAnalysis: analysis,
-        analyzedAt: new Date(),
+    // 이 건 + 동일 에러인데 미분석인 기존 건들도 한꺼번에 업데이트
+    const now = new Date();
+    const { count } = await prisma.errorLog.updateMany({
+      where: {
+        errorCode: errorLog.errorCode,
+        errorName: errorLog.errorName,
+        errorMessage: errorLog.errorMessage,
+        severity: null,
       },
+      data: { severity, aiAnalysis: analysis, analyzedAt: now },
     });
 
-    console.log(`[ErrorAnalysis] Analyzed error ${errorLog.id} → ${severity}`);
+    console.log(`[ErrorAnalysis] Analyzed ${count} error(s) (${errorLog.errorCode}/${errorLog.errorName}) → ${severity}`);
     return true;
   } catch (error) {
     console.error(`[ErrorAnalysis] Failed to analyze error ${errorLog.id}:`, error);
