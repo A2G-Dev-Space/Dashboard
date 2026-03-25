@@ -111,13 +111,18 @@ Then provide the analysis.`;
       }
     }
 
-    // Agent Dashboard 정책: 모델에 설정된 서비스ID + 에러 보고 사용자 정보를 헤더로 전달
-    if (model.agentDashboardEnabled) {
-      if (model.agentDashboardServiceId) headers['x-service-id'] = model.agentDashboardServiceId;
-      if (errorLog.user?.loginid) headers['x-user-id'] = errorLog.user.loginid;
-      if (errorLog.user?.deptname) headers['x-dept-name'] = errorLog.user.deptname;
-      if (errorLog.user?.username) headers['x-user-name'] = errorLog.user.username;
+    // 사용자/서비스 헤더 전달 (proxy.routes.ts 패턴과 동일)
+    // - agentDashboardEnabled면 설정된 serviceId 사용, 아니면 모델의 서비스명 사용
+    // - 한글은 encodeURIComponent로 인코딩 (HTTP 헤더 ASCII 제한)
+    if (model.agentDashboardServiceId) {
+      headers['x-service-id'] = model.agentDashboardServiceId;
+    } else if (model.serviceId) {
+      const svc = await prisma.service.findUnique({ where: { id: model.serviceId }, select: { name: true } });
+      if (svc) headers['x-service-id'] = svc.name;
     }
+    if (errorLog.user?.loginid) headers['x-user-id'] = errorLog.user.loginid;
+    if (errorLog.user?.deptname) headers['x-dept-name'] = encodeURIComponent(errorLog.user.deptname);
+    if (errorLog.user?.username) headers['x-user-name'] = encodeURIComponent(errorLog.user.username);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000);
