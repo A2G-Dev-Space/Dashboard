@@ -2,6 +2,7 @@
  * Error Telemetry Admin Page
  *
  * CLI/Electron에서 수집된 에러 로그를 조회하고 관리하는 SUPER_ADMIN 전용 페이지
+ * + Dashboard LLM 연동으로 에러 심각도 분류 + 원인 분석
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14,21 +15,36 @@ import {
   ChevronRight,
   Monitor,
   Terminal,
-  Clock,
   Users,
   Bug,
   Filter,
   Copy,
   Check,
   CheckSquare,
+  Brain,
+  Settings2,
+  Zap,
+  Loader2,
+  Sparkles,
+  ShieldAlert,
+  ShieldCheck,
+  Shield,
+  Info,
 } from 'lucide-react';
-import { errorTelemetryApi, type ErrorLogItem } from '../services/api';
+import {
+  errorTelemetryApi,
+  dashboardLlmApi,
+  type ErrorLogItem,
+  type DashboardLlmModel,
+} from '../services/api';
 
 interface ErrorStats {
   totalErrors: number;
   affectedUsers: number;
+  unanalyzedCount: number;
   errorsByCode: Array<{ errorCode: string; count: number }>;
   errorsBySource: Array<{ source: string; count: number }>;
+  errorsBySeverity: Array<{ severity: string; count: number }>;
   dailyTrend: Array<{ date: string; count: number }>;
 }
 
@@ -38,6 +54,13 @@ interface Pagination {
   total: number;
   totalPages: number;
 }
+
+const SEVERITY_CONFIG: Record<string, { label: string; color: string; bg: string; icon: typeof ShieldAlert }> = {
+  CRITICAL: { label: 'Critical', color: 'text-red-700', bg: 'bg-red-100', icon: ShieldAlert },
+  HIGH: { label: 'High', color: 'text-orange-700', bg: 'bg-orange-100', icon: AlertTriangle },
+  MEDIUM: { label: 'Medium', color: 'text-amber-700', bg: 'bg-amber-100', icon: Shield },
+  LOW: { label: 'Low', color: 'text-green-700', bg: 'bg-green-100', icon: ShieldCheck },
+};
 
 export default function ErrorTelemetry() {
   const [logs, setLogs] = useState<ErrorLogItem[]>([]);
@@ -56,7 +79,55 @@ export default function ErrorTelemetry() {
   // 필터
   const [filterSource, setFilterSource] = useState<string>('');
   const [filterErrorCode, setFilterErrorCode] = useState<string>('');
+  const [filterSeverity, setFilterSeverity] = useState<string>('');
   const [filterDays, setFilterDays] = useState<number>(7);
+
+  // LLM 설정
+  const [llmConfigOpen, setLlmConfigOpen] = useState(false);
+  const [llmModelId, setLlmModelId] = useState<string | null>(null);
+  const [llmModel, setLlmModel] = useState<DashboardLlmModel | null>(null);
+  const [availableModels, setAvailableModels] = useState<DashboardLlmModel[]>([]);
+  const [llmConfigLoading, setLlmConfigLoading] = useState(false);
+
+  // 분석 상태
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [batchAnalyzing, setBatchAnalyzing] = useState(false);
+
+  // LLM 설정 로드
+  useEffect(() => {
+    loadLlmConfig();
+  }, []);
+
+  const loadLlmConfig = async () => {
+    try {
+      const [configRes, modelsRes] = await Promise.all([
+        dashboardLlmApi.getConfig(),
+        dashboardLlmApi.availableModels(),
+      ]);
+      setLlmModelId(configRes.data.modelId);
+      setLlmModel(configRes.data.model);
+      setAvailableModels(modelsRes.data.models);
+    } catch (error) {
+      console.error('Failed to load LLM config:', error);
+    }
+  };
+
+  const handleSaveLlmConfig = async (modelId: string | null) => {
+    const prevModelId = llmModelId;
+    setLlmConfigLoading(true);
+    try {
+      const res = await dashboardLlmApi.setConfig(modelId);
+      setLlmModelId(res.data.modelId);
+      setLlmModel(res.data.model);
+      setLlmConfigOpen(false);
+    } catch (error) {
+      console.error('Failed to save LLM config:', error);
+      setLlmModelId(prevModelId); // 실패 시 이전 값 복원
+      alert('LLM 설정 저장에 실패했습니다.');
+    } finally {
+      setLlmConfigLoading(false);
+    }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -67,6 +138,7 @@ export default function ErrorTelemetry() {
           limit: pagination.limit,
           source: filterSource || undefined,
           errorCode: filterErrorCode || undefined,
+          severity: filterSeverity || undefined,
           days: filterDays,
         }),
         errorTelemetryApi.stats(filterDays),
@@ -81,11 +153,59 @@ export default function ErrorTelemetry() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, pagination.limit, filterSource, filterErrorCode, filterDays]);
+  }, [pagination.page, pagination.limit, filterSource, filterErrorCode, filterSeverity, filterDays]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const handleAnalyze = async (errorLogId: string) => {
+    if (!llmModelId) {
+      alert('먼저 Dashboard LLM 모델을 설정해주세요.');
+      setLlmConfigOpen(true);
+      return;
+    }
+    setAnalyzingId(errorLogId);
+    try {
+      const res = await dashboardLlmApi.analyze(errorLogId);
+      // 로컬 상태 업데이트
+      setLogs(prev => prev.map(l =>
+        l.id === errorLogId
+          ? { ...l, severity: res.data.severity, aiAnalysis: res.data.aiAnalysis, analyzedAt: res.data.analyzedAt }
+          : l
+      ));
+      setSelectedLog(prev =>
+        prev && prev.id === errorLogId
+          ? { ...prev, severity: res.data.severity, aiAnalysis: res.data.aiAnalysis, analyzedAt: res.data.analyzedAt }
+          : prev
+      );
+    } catch (error) {
+      console.error('Failed to analyze error:', error);
+      alert('에러 분석에 실패했습니다. LLM 설정을 확인해주세요.');
+    } finally {
+      setAnalyzingId(null);
+    }
+  };
+
+  const handleBatchAnalyze = async () => {
+    if (!llmModelId) {
+      alert('먼저 Dashboard LLM 모델을 설정해주세요.');
+      setLlmConfigOpen(true);
+      return;
+    }
+    if (!confirm(`미분석 에러를 일괄 분석하시겠습니까? (최대 10건)`)) return;
+    setBatchAnalyzing(true);
+    try {
+      const res = await dashboardLlmApi.analyzeBatch(20);
+      alert(`분석 완료: ${res.data.analyzed}건 성공, ${res.data.failed}건 실패 / ${res.data.total}건`);
+      loadData();
+    } catch (error) {
+      console.error('Failed to batch analyze:', error);
+      alert('일괄 분석에 실패했습니다.');
+    } finally {
+      setBatchAnalyzing(false);
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm('이 에러 로그를 삭제하시겠습니까?')) return;
@@ -139,6 +259,19 @@ export default function ErrorTelemetry() {
     return 'bg-pastel-100 text-pastel-700';
   };
 
+  const getSeverityBadge = (severity: string | null) => {
+    if (!severity) return null;
+    const config = SEVERITY_CONFIG[severity];
+    if (!config) return null;
+    const Icon = config.icon;
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${config.bg} ${config.color}`}>
+        <Icon className="w-3 h-3" />
+        {config.label}
+      </span>
+    );
+  };
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -181,6 +314,8 @@ export default function ErrorTelemetry() {
         errorName: l.errorName,
         errorCode: l.errorCode,
         errorMessage: l.errorMessage,
+        severity: l.severity,
+        aiAnalysis: l.aiAnalysis,
         isRecoverable: l.isRecoverable,
         stackTrace: l.stackTrace || null,
         context: l.context || null,
@@ -220,10 +355,35 @@ export default function ErrorTelemetry() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-pastel-800">에러 텔레메트리</h1>
-            <p className="text-sm text-pastel-500">CLI/Electron 에러 수집 및 분석</p>
+            <p className="text-sm text-pastel-500">CLI/Electron 에러 수집 · AI 심각도 분류 · 원인 분석</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLlmConfigOpen(!llmConfigOpen)}
+            className={`px-3 py-2 text-sm rounded-lg transition-colors flex items-center gap-1.5 ${
+              llmModel
+                ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+            }`}
+          >
+            <Settings2 className="w-4 h-4" />
+            {llmModel ? llmModel.displayName : 'LLM 미설정'}
+          </button>
+          {stats && stats.unanalyzedCount > 0 && (
+            <button
+              onClick={handleBatchAnalyze}
+              disabled={batchAnalyzing || !llmModelId}
+              className="px-3 py-2 text-sm bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              {batchAnalyzing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              {batchAnalyzing ? '분석 중...' : `일괄 분석 (${stats.unanalyzedCount}건)`}
+            </button>
+          )}
           <button
             onClick={handleCleanup}
             className="px-3 py-2 text-sm text-pastel-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -240,6 +400,46 @@ export default function ErrorTelemetry() {
           </button>
         </div>
       </div>
+
+      {/* LLM 설정 패널 */}
+      {llmConfigOpen && (
+        <div className="bg-white rounded-xl border border-pastel-200 p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-violet-500" />
+              <h3 className="text-sm font-semibold text-pastel-800">Dashboard LLM 설정</h3>
+            </div>
+            <button onClick={() => setLlmConfigOpen(false)} className="p-1 text-pastel-400 hover:text-pastel-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-pastel-500">
+            에러 심각도 분류 및 원인 분석에 사용할 LLM 모델을 선택하세요. 기존 서비스에 등록된 모델 중 선택합니다.
+          </p>
+          <div className="flex items-center gap-3">
+            <select
+              value={llmModelId || ''}
+              onChange={(e) => setLlmModelId(e.target.value || null)}
+              className="flex-1 px-3 py-2 text-sm border border-pastel-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+            >
+              <option value="">모델 선택 안 함 (비활성화)</option>
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.displayName} ({m.name}) — {m.service?.displayName || '서비스 없음'}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => handleSaveLlmConfig(llmModelId)}
+              disabled={llmConfigLoading}
+              className="px-4 py-2 text-sm bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50 rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              {llmConfigLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              저장
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 통계 카드 */}
       {stats && (
@@ -279,18 +479,50 @@ export default function ErrorTelemetry() {
           </div>
           <div className="bg-white rounded-xl border border-pastel-200 p-5">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-50 rounded-lg">
-                <Clock className="w-5 h-5 text-green-500" />
+              <div className="p-2 bg-violet-50 rounded-lg">
+                <Brain className="w-5 h-5 text-violet-500" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-pastel-800">
-                  {stats.dailyTrend.length > 0
-                    ? Math.round(stats.totalErrors / Math.max(stats.dailyTrend.length, 1))
-                    : 0}
+                  {stats.totalErrors - stats.unanalyzedCount}
+                  <span className="text-sm font-normal text-pastel-400"> / {stats.totalErrors}</span>
                 </p>
-                <p className="text-xs text-pastel-500">일평균 에러</p>
+                <p className="text-xs text-pastel-500">AI 분석 완료</p>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 심각도별 분포 */}
+      {stats && stats.errorsBySeverity.length > 0 && (
+        <div className="bg-white rounded-xl border border-pastel-200 p-5">
+          <h3 className="text-sm font-semibold text-pastel-700 mb-3 flex items-center gap-2">
+            <Zap className="w-4 h-4 text-violet-500" />
+            심각도별 분포
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => {
+              const item = stats.errorsBySeverity.find(e => e.severity === sev);
+              if (!item) return null;
+              const config = SEVERITY_CONFIG[sev];
+              const Icon = config.icon;
+              return (
+                <button
+                  key={sev}
+                  onClick={() => { setFilterSeverity(filterSeverity === sev ? '' : sev); setPagination(p => ({ ...p, page: 1 })); }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                    filterSeverity === sev
+                      ? 'bg-samsung-blue text-white ring-2 ring-samsung-blue/30'
+                      : `${config.bg} ${config.color}`
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {config.label}
+                  <span className="font-bold">{item.count}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -335,6 +567,17 @@ export default function ErrorTelemetry() {
             <option value="electron">Electron</option>
           </select>
           <select
+            value={filterSeverity}
+            onChange={(e) => { setFilterSeverity(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+            className="px-3 py-1.5 text-sm border border-pastel-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-samsung-blue/50"
+          >
+            <option value="">전체 심각도</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+          </select>
+          <select
             value={filterDays}
             onChange={(e) => { setFilterDays(Number(e.target.value)); setPagination(p => ({ ...p, page: 1 })); }}
             className="px-3 py-1.5 text-sm border border-pastel-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-samsung-blue/50"
@@ -344,9 +587,9 @@ export default function ErrorTelemetry() {
             <option value={14}>최근 14일</option>
             <option value={30}>최근 30일</option>
           </select>
-          {(filterSource || filterErrorCode) && (
+          {(filterSource || filterErrorCode || filterSeverity) && (
             <button
-              onClick={() => { setFilterSource(''); setFilterErrorCode(''); }}
+              onClick={() => { setFilterSource(''); setFilterErrorCode(''); setFilterSeverity(''); }}
               className="px-2 py-1 text-xs text-pastel-500 hover:text-pastel-700 hover:bg-pastel-100 rounded-lg transition-colors"
             >
               <X className="w-3.5 h-3.5 inline mr-0.5" />
@@ -390,12 +633,12 @@ export default function ErrorTelemetry() {
                     </button>
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">시간</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">심각도</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">에러</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">사용자</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">소스</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">버전</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-pastel-500 uppercase">메시지</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-pastel-500 uppercase w-16"></th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-pastel-500 uppercase w-24">분석</th>
                 </tr>
               </thead>
               <tbody>
@@ -423,6 +666,15 @@ export default function ErrorTelemetry() {
                       {formatDate(log.timestamp)}
                     </td>
                     <td className="px-4 py-3">
+                      {log.severity ? (
+                        getSeverityBadge(log.severity) || <span className="text-xs text-pastel-500">{log.severity}</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs text-pastel-400 bg-pastel-50">
+                          미분석
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getCodeColor(log.errorCode)}`}>
                         {log.errorCode}
                       </span>
@@ -437,19 +689,32 @@ export default function ErrorTelemetry() {
                         {log.source}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-xs text-pastel-500 font-mono">
-                      {log.appVersion}
-                    </td>
                     <td className="px-4 py-3 text-xs text-pastel-600 max-w-xs truncate">
                       {log.errorMessage}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(log.id); }}
-                        className="p-1 text-pastel-400 hover:text-red-500 rounded transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        {!log.severity && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleAnalyze(log.id); }}
+                            disabled={analyzingId === log.id}
+                            className="p-1 text-violet-400 hover:text-violet-600 hover:bg-violet-50 rounded transition-colors disabled:opacity-50"
+                            title="AI 분석"
+                          >
+                            {analyzingId === log.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Brain className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(log.id); }}
+                          className="p-1 text-pastel-400 hover:text-red-500 rounded transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -538,7 +803,7 @@ export default function ErrorTelemetry() {
       {selectedLog && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setSelectedLog(null)}>
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto"
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             {/* 모달 헤더 */}
@@ -549,9 +814,12 @@ export default function ErrorTelemetry() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-pastel-800">{selectedLog.errorName}</h3>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getCodeColor(selectedLog.errorCode)}`}>
-                    {selectedLog.errorCode}
-                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getCodeColor(selectedLog.errorCode)}`}>
+                      {selectedLog.errorCode}
+                    </span>
+                    {getSeverityBadge(selectedLog.severity)}
+                  </div>
                 </div>
               </div>
               <button
@@ -608,6 +876,45 @@ export default function ErrorTelemetry() {
                 </div>
               </div>
 
+              {/* AI 분석 결과 */}
+              {selectedLog.aiAnalysis ? (
+                <div className="bg-violet-50 border border-violet-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="w-4 h-4 text-violet-500" />
+                    <span className="text-xs font-semibold text-violet-700">AI 분석 결과</span>
+                    {selectedLog.analyzedAt && (
+                      <span className="text-[10px] text-violet-400 ml-auto">
+                        {formatDate(selectedLog.analyzedAt)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-violet-900 whitespace-pre-wrap leading-relaxed">
+                    {selectedLog.aiAnalysis}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-pastel-50 border border-pastel-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 text-pastel-400" />
+                      <span className="text-xs text-pastel-500">AI 분석이 아직 수행되지 않았습니다</span>
+                    </div>
+                    <button
+                      onClick={() => handleAnalyze(selectedLog.id)}
+                      disabled={analyzingId === selectedLog.id || !llmModelId}
+                      className="px-3 py-1.5 text-xs bg-violet-500 text-white hover:bg-violet-600 disabled:opacity-50 rounded-lg transition-colors flex items-center gap-1.5"
+                    >
+                      {analyzingId === selectedLog.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Brain className="w-3.5 h-3.5" />
+                      )}
+                      {analyzingId === selectedLog.id ? '분석 중...' : 'AI 분석 실행'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* 에러 메시지 */}
               <div>
                 <span className="text-xs text-pastel-400">에러 메시지</span>
@@ -639,6 +946,16 @@ export default function ErrorTelemetry() {
 
             {/* 모달 푸터 */}
             <div className="border-t border-pastel-100 px-6 py-3 flex justify-end gap-2">
+              {!selectedLog.severity && (
+                <button
+                  onClick={() => handleAnalyze(selectedLog.id)}
+                  disabled={analyzingId === selectedLog.id || !llmModelId}
+                  className="px-3 py-1.5 text-xs text-violet-600 hover:bg-violet-50 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <Brain className="w-3.5 h-3.5" />
+                  AI 분석
+                </button>
+              )}
               <button
                 onClick={() => { handleDelete(selectedLog.id); setSelectedLog(null); }}
                 className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg transition-colors"

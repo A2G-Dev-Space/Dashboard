@@ -443,6 +443,11 @@ model ErrorLog {
 
   timestamp     DateTime @default(now())
 
+  // AI 분석 결과 (LLM이 분류)
+  severity      String?                          // "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | null (미분석)
+  aiAnalysis    String?  @map("ai_analysis") @db.Text  // LLM 원인 분석 + 해결 방안
+  analyzedAt    DateTime? @map("analyzed_at")
+
   user    User     @relation(fields: [userId], references: [id])
   service Service? @relation(fields: [serviceId], references: [id])
 
@@ -450,5 +455,17 @@ model ErrorLog {
   @@index([serviceId])
   @@index([errorCode])
   @@index([timestamp])
+  @@index([severity])
   @@map("error_logs")
+}
+
+// ============================================
+// Dashboard 내부 설정 (키-값 저장소)
+// ============================================
+model DashboardConfig {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("dashboard_config")
 }

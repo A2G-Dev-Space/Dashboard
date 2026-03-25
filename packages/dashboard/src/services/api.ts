@@ -305,14 +305,16 @@ export const llmTestApi = {
 
 // 에러 텔레메트리 API
 export const errorTelemetryApi = {
-  logs: (params?: { page?: number; limit?: number; source?: string; errorCode?: string; userId?: string; serviceId?: string; days?: number }) =>
+  logs: (params?: { page?: number; limit?: number; source?: string; errorCode?: string; userId?: string; serviceId?: string; severity?: string; analyzed?: string; days?: number }) =>
     api.get<{ logs: ErrorLogItem[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>('/error-telemetry/logs', { params }),
   stats: (days = 30) =>
     api.get<{
       totalErrors: number;
       affectedUsers: number;
+      unanalyzedCount: number;
       errorsByCode: Array<{ errorCode: string; count: number }>;
       errorsBySource: Array<{ source: string; count: number }>;
+      errorsBySeverity: Array<{ severity: string; count: number }>;
       dailyTrend: Array<{ date: string; count: number }>;
     }>('/error-telemetry/stats', { params: { days } }),
   delete: (id: string) => api.delete(`/error-telemetry/logs/${id}`),
@@ -332,9 +334,35 @@ export interface ErrorLogItem {
   isRecoverable: boolean;
   context: Record<string, unknown> | null;
   timestamp: string;
+  severity: string | null;
+  aiAnalysis: string | null;
+  analyzedAt: string | null;
   user: { id: string; loginid: string; username: string; deptname: string };
   service: { id: string; name: string; displayName: string } | null;
 }
+
+// Dashboard LLM API
+export interface DashboardLlmModel {
+  id: string;
+  name: string;
+  displayName: string;
+  endpointUrl: string;
+  enabled: boolean;
+  service: { id: string; name: string; displayName: string } | null;
+}
+
+export const dashboardLlmApi = {
+  getConfig: () =>
+    api.get<{ modelId: string | null; model: DashboardLlmModel | null }>('/dashboard-llm/config'),
+  setConfig: (modelId: string | null) =>
+    api.put<{ modelId: string | null; model: DashboardLlmModel | null }>('/dashboard-llm/config', { modelId }),
+  availableModels: () =>
+    api.get<{ models: DashboardLlmModel[] }>('/dashboard-llm/available-models'),
+  analyze: (errorLogId: string) =>
+    api.post<{ severity: string; aiAnalysis: string; analyzedAt: string }>('/dashboard-llm/analyze', { errorLogId }),
+  analyzeBatch: (limit?: number) =>
+    api.post<{ analyzed: number; failed: number; total: number }>('/dashboard-llm/analyze-batch', { limit }),
+};
 
 // 휴일 관리 API
 export interface Holiday {

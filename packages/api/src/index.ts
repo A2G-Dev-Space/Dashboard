@@ -31,6 +31,7 @@ import { holidaysRoutes } from './routes/holidays.routes.js';
 import { llmTestRoutes } from './routes/llm-test.routes.js';
 import { startLLMTestScheduler, stopLLMTestScheduler } from './services/llm-test.service.js';
 import { errorTelemetryRoutes } from './routes/error-telemetry.routes.js';
+import { dashboardLlmRoutes } from './routes/dashboard-llm.routes.js';
 import { versionRoutes } from './routes/version.routes.js';
 import { startErrorCleanupScheduler } from './services/error-cleanup.service.js';
 import { seedHolidays } from './services/holiday-seed.service.js';
@@ -87,6 +88,7 @@ app.use('/rating', ratingRoutes);
 app.use('/holidays', holidaysRoutes);
 app.use('/llm-test', llmTestRoutes);
 app.use('/error-telemetry', errorTelemetryRoutes);
+app.use('/dashboard-llm', dashboardLlmRoutes);
 app.use('/versions', versionRoutes);
 
 // LLM Proxy Routes (OpenAI-compatible)

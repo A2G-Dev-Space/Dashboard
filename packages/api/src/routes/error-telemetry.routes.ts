@@ -18,6 +18,7 @@ import {
   requireSuperAdmin,
   type AuthenticatedRequest,
 } from '../middleware/auth.js';
+import { analyzeAndSaveError } from '../services/error-analysis.service.js';
 
 export const errorTelemetryRoutes = Router();
 
@@ -139,6 +140,18 @@ errorTelemetryRoutes.post(
       });
 
       res.status(201).json({ id: errorLog.id });
+
+      // Fire-and-forget: IIFE로 외부 try/catch와 완전 격리
+      (async () => {
+        const service = validServiceId
+          ? await prisma.service.findUnique({ where: { id: validServiceId }, select: { name: true, displayName: true } })
+          : null;
+        await analyzeAndSaveError(prisma, {
+          ...errorLog,
+          user: { loginid, username: username || loginid, deptname: deptname || '' },
+          service,
+        });
+      })().catch(() => {});
     } catch (error) {
       console.error('Error telemetry report error:', error);
       res.status(500).json({ error: 'Failed to save error report' });
@@ -165,6 +178,8 @@ errorTelemetryRoutes.get(
       const source = req.query['source'] as string | undefined;
       const userId = req.query['userId'] as string | undefined;
       const serviceId = req.query['serviceId'] as string | undefined;
+      const severity = req.query['severity'] as string | undefined;
+      const analyzed = req.query['analyzed'] as string | undefined; // "true" | "false"
       const days = parseInt(req.query['days'] as string) || 30;
 
       const since = new Date();
@@ -178,6 +193,9 @@ errorTelemetryRoutes.get(
       if (source) where['source'] = source;
       if (userId) where['userId'] = userId;
       if (serviceId) where['serviceId'] = serviceId;
+      if (severity) where['severity'] = severity;
+      else if (analyzed === 'true') where['severity'] = { not: null };
+      else if (analyzed === 'false') where['severity'] = null;
 
       const [logs, total] = await Promise.all([
         prisma.errorLog.findMany({
@@ -233,7 +251,9 @@ errorTelemetryRoutes.get(
         totalErrors,
         errorsByCode,
         errorsBySource,
+        errorsBySeverity,
         affectedUsers,
+        unanalyzedCount,
         dailyTrend,
       ] = await Promise.all([
         // 총 에러 수
@@ -255,12 +275,25 @@ errorTelemetryRoutes.get(
           _count: { id: true },
         }),
 
+        // severity별 집계
+        prisma.errorLog.groupBy({
+          by: ['severity'],
+          where: { ...where, severity: { not: null } },
+          _count: { id: true },
+          orderBy: { _count: { id: 'desc' } },
+        }),
+
         // 영향받은 사용자 수
         prisma.errorLog.groupBy({
           by: ['userId'],
           where,
           _count: { id: true },
         }).then(r => r.length),
+
+        // 미분석 에러 수
+        prisma.errorLog.count({
+          where: { ...where, severity: null },
+        }),
 
         // 일별 트렌드 (최근 N일)
         prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
@@ -276,12 +309,17 @@ errorTelemetryRoutes.get(
       res.json({
         totalErrors,
         affectedUsers,
+        unanalyzedCount,
         errorsByCode: errorsByCode.map(e => ({
           errorCode: e.errorCode,
           count: e._count.id,
         })),
         errorsBySource: errorsBySource.map(e => ({
           source: e.source,
+          count: e._count.id,
+        })),
+        errorsBySeverity: errorsBySeverity.map(e => ({
+          severity: e.severity as string,
           count: e._count.id,
         })),
         dailyTrend: dailyTrend.map(d => ({
