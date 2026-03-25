@@ -33,11 +33,39 @@ export async function analyzeAndSaveError(
   errorLog: ErrorLogForAnalysis,
 ): Promise<boolean> {
   try {
+    // 동일 에러(errorCode + errorName + errorMessage)가 이미 분석되어 있으면 결과 복사
+    // 사용자만 다르고 에러 내용이 같으면 LLM 재호출 불필요
+    const existing = await prisma.errorLog.findFirst({
+      where: {
+        errorCode: errorLog.errorCode,
+        errorName: errorLog.errorName,
+        errorMessage: errorLog.errorMessage,
+        severity: { not: null },
+        id: { not: errorLog.id },
+      },
+      select: { severity: true, aiAnalysis: true },
+      orderBy: { analyzedAt: 'desc' },
+    });
+
+    if (existing?.severity) {
+      await prisma.errorLog.update({
+        where: { id: errorLog.id },
+        data: {
+          severity: existing.severity,
+          aiAnalysis: existing.aiAnalysis,
+          analyzedAt: new Date(),
+        },
+      });
+      console.log(`[ErrorAnalysis] Reused existing analysis for ${errorLog.id} (${errorLog.errorCode}/${errorLog.errorName}) → ${existing.severity}`);
+      return true;
+    }
+
+    // 기분석된 동일 에러 없음 → LLM 호출
     const config = await prisma.dashboardConfig.findUnique({
       where: { key: CONFIG_KEY_MODEL_ID },
     });
 
-    if (!config?.value) return false; // LLM 미설정이면 무시
+    if (!config?.value) return false;
 
     const model = await prisma.model.findUnique({
       where: { id: config.value },
