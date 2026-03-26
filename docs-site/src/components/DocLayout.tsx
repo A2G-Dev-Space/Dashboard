@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Menu, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,23 +17,11 @@ interface DocLayoutProps {
   contentPath: string;
 }
 
-function MarkdownLink({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-  const navigate = useNavigate();
+function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   if (href && href.startsWith('/') && !href.startsWith('//')) {
-    return (
-      <a
-        {...props}
-        href={href}
-        onClick={(e) => {
-          e.preventDefault();
-          navigate(href);
-        }}
-      >
-        {children}
-      </a>
-    );
+    return <Link to={href}>{children}</Link>;
   }
-  return <a href={href} {...props}>{children}</a>;
+  return <a href={href}>{children}</a>;
 }
 
 export default function DocLayout({ title, sidebarItems, contentPath }: DocLayoutProps) {
