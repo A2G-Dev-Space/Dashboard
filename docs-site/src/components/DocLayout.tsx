@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronRight, Menu, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -15,6 +15,25 @@ interface DocLayoutProps {
   title: string;
   sidebarItems: SidebarItem[];
   contentPath: string;
+}
+
+function MarkdownLink({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+  const navigate = useNavigate();
+  if (href && href.startsWith('/') && !href.startsWith('//')) {
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(e) => {
+          e.preventDefault();
+          navigate(href);
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  return <a href={href} {...props}>{children}</a>;
 }
 
 export default function DocLayout({ title, sidebarItems, contentPath }: DocLayoutProps) {
@@ -123,7 +142,7 @@ export default function DocLayout({ title, sidebarItems, contentPath }: DocLayou
             </div>
           ) : (
             <article className="prose max-w-3xl">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{ a: MarkdownLink }}>
                 {content}
               </ReactMarkdown>
             </article>
